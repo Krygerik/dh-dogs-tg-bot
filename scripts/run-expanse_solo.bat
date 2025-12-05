@@ -16,19 +16,19 @@ if "%SERVER_ENV%"=="LOCALE" (
     cd /d "C:\Users\Server\WindowsServer\DreadHunger\Binaries\Win64"
 )
 
-:: Start the Dread Hunger server (Expanse map) and capture PID using PowerShell
-for /f %%p in ('powershell -Command "& { $proc = Start-Process -FilePath 'DreadHungerServer-Win64-Shipping.exe' -ArgumentList 'Expanse_Persistent?daysbeforeblizzard=3?maxplayers=8?thralls=2 -log' -PassThru; Write-Output $proc.Id }"') do (
+:: Start the Dread Hunger server (Expanse Solo map) and capture PID using PowerShell
+for /f %%p in ('powershell -Command "& { $proc = Start-Process -FilePath 'DreadHungerServer-Win64-Shipping.exe' -ArgumentList 'Expanse_Persistent?daysbeforeblizzard=3?maxplayers=2?thralls=1 -log' -PassThru; Write-Output $proc.Id }"') do (
     set PID=%%p
 )
 
 :: Write PID to file in scripts directory
 echo %PID%> "%~dp0server.pid"
-echo expanse> "%~dp0server.map"
+echo expanse_solo> "%~dp0server.map"
 
 :: Run the Python loader script (if exists in server directory)
-if exist "loader_for_expanse.py" (
+if exist "loader2.py" (
     echo [INFO] Running Python loader...
-    python "loader_for_expanse.py"
+    python "loader2.py"
 )
 
-echo [OK] Expanse server started. PID: %PID% [%SERVER_ENV%]
+echo [OK] Expanse Solo server started. PID: %PID% [%SERVER_ENV%]

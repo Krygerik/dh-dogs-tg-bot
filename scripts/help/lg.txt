@@ -1,3 +1,0 @@
-Frida Base Address Log
-=====================
-Base address of the game: 0x7ff6da640000

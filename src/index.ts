@@ -18,6 +18,7 @@ const MAP_FILE = path.join(SCRIPTS_DIR, 'server.map');
 const MAP_NAMES: Record<string, string> = {
   departure: '🏔️ Вершина',
   expanse: '🌄 Просторы',
+  expanse_solo: '🎯 Соло просторы',
 };
 
 // Server address
@@ -179,6 +180,7 @@ bot.onText(/\/help/, (msg) => {
 /run — Выбор и запуск игрового сервера
   • 🏔️ Вершина (Departure)
   • 🌄 Просторы (Expanse)
+  • 🎯 Соло просторы (Expanse Solo)
 
 /stop — Принудительная остановка сервера
   Завершает текущий запущенный процесс
@@ -270,6 +272,9 @@ bot.onText(/\/run/, (msg) => {
           { text: '🏔️ Вершина', callback_data: 'run_departure' },
           { text: '🌄 Просторы', callback_data: 'run_expanse' },
         ],
+        [
+          { text: '🎯 Соло просторы', callback_data: 'run_expanse_solo' },
+        ],
       ],
     },
   };
@@ -299,6 +304,9 @@ bot.on('callback_query', async (callbackQuery) => {
   } else if (data === 'run_expanse') {
     scriptName = 'run-expanse.bat';
     displayName = '🌄 Просторы';
+  } else if (data === 'run_expanse_solo') {
+    scriptName = 'run-expanse_solo.bat';
+    displayName = '🎯 Соло просторы';
   } else {
     return;
   }
