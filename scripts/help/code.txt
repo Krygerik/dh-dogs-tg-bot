@@ -1,0 +1,20 @@
+cd C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64
+start DreadHungerServer-Win64-Shipping.exe Departure_Persistent?daysbeforeblizzard=4?maxplayers=1?thralls=1 -log
+
+start DreadHungerServer-Win64-Shipping.exe Expanse_Persistent?daysbeforeblizzard=3?maxplayers=8?thralls=2 -log
+start DreadHungerServer-Win64-Shipping.exe Departure_Persistent?daysbeforeblizzard=3?maxplayers=8?thralls=2 -log
+
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\stalker_trace.js
+frida-inject -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\frida.dll
+
+
+
+3.121.98.154:7777
+
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\loader.js
+
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\randroles.js
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\fullspells.js
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\spellboost.js
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\quests.js
+frida -n DreadHungerServer-Win64-Shipping.exe -l C:\Users\Administrator\Desktop\WindowsServer\DreadHunger\Binaries\Win64\Patches\spell_cast_start.js

@@ -1,0 +1,25 @@
+{
+  "name": "dh-dogs-tg-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for DH Dogs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": ["telegram", "bot"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "@types/node-telegram-bot-api": "^0.64.1",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}
+
