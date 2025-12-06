@@ -1,86 +1,173 @@
-# DH Dogs Telegram Bot 🐕
+# Dread Hunger Server Bot 🎮
 
-A simple Telegram bot built with TypeScript that provides dog-related commands.
+Telegram бот для управления игровым сервером Dread Hunger на Windows Server.
 
-## Features
+## Возможности
 
-### Bot Commands
-| Command | Description |
-|---------|-------------|
-| `/start` | Shows welcome message and available commands |
-| `/run` | Выбор и запуск скрипта (Вершина / Просторы) |
-| `/dog` | Returns a random fun fact about dogs |
+### Команды бота
+| Команда | Описание |
+|---------|----------|
+| `/start` | Приветственное сообщение |
+| `/help` | Список всех команд |
+| `/run` | Выбор и запуск сервера |
+| `/testing` | Тестовые режимы (соло/дуо) |
+| `/stop` | Остановка сервера |
+| `/status` | Статус текущего сервера |
+| `/dog` | Случайный факт о собаках 🐕 |
 
-## Prerequisites
+### Доступные карты (/run)
+| Кнопка | Карта | Игроков |
+|--------|-------|---------|
+| 🏔️ Вершина | Departure | 8 игроков, 2 предателя |
+| 🌄 Просторы | Expanse | 8 игроков, 2 предателя |
 
-- **Node.js** (v18 or higher) - [Download](https://nodejs.org/)
-- **Telegram Bot Token** - Get one from [@BotFather](https://t.me/BotFather)
+### Тестовые режимы (/testing)
+| Кнопка | Карта | Игроков |
+|--------|-------|---------|
+| 🎯 Соло просторы | Expanse Solo | 1 игрок, 1 предатель |
+| 👥 Дуо просторы | Expanse Duo | 2 игрока, 1 предатель |
 
 ---
 
-## Quick Start
+## Требования
 
-### 1. Clone/Download the project
+- **Node.js** (v18 или выше) - [Скачать](https://nodejs.org/)
+- **Python** (для loader скриптов) - [Скачать](https://python.org/)
+- **Telegram Bot Token** - Получить у [@BotFather](https://t.me/BotFather)
+
+---
+
+## Быстрый старт
+
+### 1. Клонировать проект
 ```bash
 git clone <repository-url>
 cd dh-dogs-tg-bot
 ```
 
-### 2. Configure Environment
+### 2. Настроить окружение
 ```bash
-# Copy example environment file
 copy env.example .env
-
-# Edit .env file and add your bot token
 notepad .env
 ```
 
-Set your bot token in `.env`:
+Заполнить `.env`:
 ```
 BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+SERVER_ENV=SERVER
 ```
 
-### 3. Run the Bot
-Double-click `start.bat` or run:
+### 3. Запустить бота
 ```bash
-start.bat
+start-bot.bat
 ```
 
 ---
 
-## Batch Scripts
+## Конфигурация
 
-| Script | Description |
-|--------|-------------|
-| `start.bat` | Installs dependencies, builds TypeScript, and starts the bot |
-| `stop.bat` | Stops all running bot instances |
-| `restart.bat` | Stops and restarts the bot |
+### Переменные окружения (.env)
+
+| Переменная | Описание | Значения |
+|------------|----------|----------|
+| `BOT_TOKEN` | Токен Telegram бота | Получить у @BotFather |
+| `SERVER_ENV` | Окружение сервера | `LOCALE` или `SERVER` |
+
+### Пути к серверу
+
+| SERVER_ENV | Путь |
+|------------|------|
+| `LOCALE` | `D:\steam\steamapps\common\Dread Hunger\WindowsServer\DreadHunger\Binaries\Win64` |
+| `SERVER` | `C:\Users\Server\WindowsServer\DreadHunger\Binaries\Win64` |
 
 ---
 
-## Windows Server Hosting Instructions
+## Python Loader скрипты
 
-### Step 1: Install Node.js
+Бот автоматически запускает Python скрипты после старта сервера, если они существуют в директории сервера.
 
-1. Download Node.js LTS from https://nodejs.org/
-2. Run the installer with default settings
-3. Verify installation:
+### Зависимость скриптов
+
+| BAT скрипт | Python скрипт | Описание |
+|------------|---------------|----------|
+| `run-departure.bat` | `loader_for_departure.py` | Loader для карты Вершина |
+| `run-expanse.bat` | `loader_for_expanse.py` | Loader для карты Просторы |
+| `run-expanse_solo.bat` | `loader2.py` | Loader для Соло просторов |
+| `run-expanse_duo.bat` | `loader2.py` | Loader для Дуо просторов |
+
+### Расположение Python скриптов
+
+Python скрипты должны находиться в той же директории, что и `DreadHungerServer-Win64-Shipping.exe`:
+
+**Для LOCALE:**
+```
+D:\steam\steamapps\common\Dread Hunger\WindowsServer\DreadHunger\Binaries\Win64\
+├── DreadHungerServer-Win64-Shipping.exe
+├── loader_for_departure.py
+├── loader_for_expanse.py
+└── loader2.py
+```
+
+**Для SERVER:**
+```
+C:\Users\Server\WindowsServer\DreadHunger\Binaries\Win64\
+├── DreadHungerServer-Win64-Shipping.exe
+├── loader_for_departure.py
+├── loader_for_expanse.py
+└── loader2.py
+```
+
+> ⚠️ Python скрипты опциональны. Если файл не найден, сервер запустится без него.
+
+---
+
+## Структура проекта
+
+```
+dh-dogs-tg-bot/
+├── src/
+│   └── index.ts            # Исходный код бота
+├── scripts/
+│   ├── run-departure.bat    # 🏔️ Вершина
+│   ├── run-expanse.bat      # 🌄 Просторы
+│   ├── run-expanse_solo.bat # 🎯 Соло просторы
+│   ├── run-expanse_duo.bat  # 👥 Дуо просторы
+│   ├── server.pid           # PID текущего сервера (генерируется)
+│   └── server.map           # Название текущей карты (генерируется)
+├── dist/                   # Скомпилированный JS (генерируется)
+├── node_modules/           # Зависимости (генерируется)
+├── .env                    # Переменные окружения
+├── env.example             # Пример .env файла
+├── package.json            # Конфигурация проекта
+├── tsconfig.json           # Конфигурация TypeScript
+└── start-bot.bat           # Запуск бота
+```
+
+---
+
+## Хостинг на Windows Server
+
+### Шаг 1: Установить Node.js
+
+1. Скачать Node.js LTS с https://nodejs.org/
+2. Установить с настройками по умолчанию
+3. Проверить установку:
    ```cmd
    node --version
    npm --version
    ```
 
-### Step 2: Deploy Bot Files
+### Шаг 2: Развернуть файлы бота
 
-1. Copy the entire project folder to your server (e.g., `C:\Bots\dh-dogs-tg-bot\`)
-2. Create the `.env` file with your bot token:
+1. Скопировать проект на сервер (например, `C:\Bots\dh-dogs-tg-bot\`)
+2. Создать `.env` файл:
    ```cmd
    cd C:\Bots\dh-dogs-tg-bot
    copy env.example .env
    notepad .env
    ```
 
-### Step 3: Install Dependencies & Build
+### Шаг 3: Установить зависимости и собрать
 
 ```cmd
 cd C:\Bots\dh-dogs-tg-bot
@@ -88,153 +175,63 @@ npm install
 npm run build
 ```
 
-### Step 4: Run Bot Manually (Testing)
+### Шаг 4: Запуск через Task Scheduler (рекомендуется)
 
-```cmd
-start.bat
-```
-
-### Step 5: Run Bot as Windows Service (Production)
-
-#### Option A: Using Task Scheduler (Recommended)
-
-1. Open **Task Scheduler** (`taskschd.msc`)
-2. Click **Create Task** (not Basic Task)
-3. **General tab:**
-   - Name: `DH Dogs Telegram Bot`
+1. Открыть **Task Scheduler** (`taskschd.msc`)
+2. Нажать **Create Task**
+3. **General:**
+   - Name: `Dread Hunger Server Bot`
    - Check: `Run whether user is logged on or not`
    - Check: `Run with highest privileges`
-4. **Triggers tab:**
+4. **Triggers:**
    - New → Begin task: `At startup`
-5. **Actions tab:**
+5. **Actions:**
    - New → Action: `Start a program`
-   - Program: `C:\Bots\dh-dogs-tg-bot\start.bat`
+   - Program: `C:\Bots\dh-dogs-tg-bot\start-bot.bat`
    - Start in: `C:\Bots\dh-dogs-tg-bot`
-6. **Settings tab:**
+6. **Settings:**
    - Uncheck: `Stop the task if it runs longer than`
-   - Check: `If the task fails, restart every: 1 minute`
-7. Click **OK** and enter your Windows credentials
-
-#### Option B: Using NSSM (Non-Sucking Service Manager)
-
-1. Download NSSM from https://nssm.cc/download
-2. Extract and copy `nssm.exe` to `C:\Windows\System32\`
-3. Open Command Prompt as Administrator:
-   ```cmd
-   nssm install DHDogsBot
-   ```
-4. Configure in the GUI:
-   - **Path:** `C:\Program Files\nodejs\node.exe`
-   - **Startup directory:** `C:\Bots\dh-dogs-tg-bot`
-   - **Arguments:** `dist/index.js`
-5. Start the service:
-   ```cmd
-   nssm start DHDogsBot
-   ```
-
-#### Option C: Using PM2 (Process Manager)
-
-1. Install PM2 globally:
-   ```cmd
-   npm install -g pm2
-   npm install -g pm2-windows-startup
-   ```
-2. Start the bot with PM2:
-   ```cmd
-   cd C:\Bots\dh-dogs-tg-bot
-   pm2 start dist/index.js --name "dh-dogs-bot"
-   ```
-3. Save PM2 configuration:
-   ```cmd
-   pm2 save
-   pm2-startup install
-   ```
-
-### Step 6: Configure Firewall (If Needed)
-
-The bot uses **outbound HTTPS connections only** (polling mode), so no inbound firewall rules are required.
-
-### Step 7: Monitoring & Logs
-
-**Check if bot is running:**
-```cmd
-tasklist | findstr node
-```
-
-**View PM2 logs (if using PM2):**
-```cmd
-pm2 logs dh-dogs-bot
-```
-
-**View Windows Event logs (if using NSSM):**
-- Open Event Viewer → Windows Logs → Application
+7. Нажать **OK**
 
 ---
 
-## Troubleshooting
+## Решение проблем
 
-| Problem | Solution |
-|---------|----------|
-| `BOT_TOKEN is not set` | Create `.env` file with your token |
-| `ETELEGRAM: 401 Unauthorized` | Invalid bot token - check with @BotFather |
-| `ETELEGRAM: 409 Conflict` | Another instance is running - use `stop.bat` |
-| Bot not responding | Check if Node.js process is running |
-| Build errors | Delete `node_modules` and `dist`, run `npm install` again |
-
----
-
-## Project Structure
-
-```
-dh-dogs-tg-bot/
-├── src/
-│   └── index.ts        # Bot source code
-├── scripts/            # Batch scripts to run
-│   ├── run-departure.bat   # Вершина script
-│   └── run-expanse.bat     # Просторы script
-├── dist/               # Compiled JavaScript (generated)
-├── node_modules/       # Dependencies (generated)
-├── .env                # Environment variables (create from env.example)
-├── env.example         # Example environment file
-├── package.json        # Project configuration
-├── tsconfig.json       # TypeScript configuration
-├── start.bat           # Start the bot
-├── stop.bat            # Stop the bot
-└── restart.bat         # Restart the bot
-```
+| Проблема | Решение |
+|----------|---------|
+| `BOT_TOKEN is not set` | Создать `.env` файл с токеном |
+| `ETELEGRAM: 401 Unauthorized` | Неверный токен бота |
+| `ETELEGRAM: 409 Conflict` | Бот уже запущен в другом месте |
+| Сервер не запускается | Проверить путь в `SERVER_ENV` |
+| Python loader не работает | Проверить название и расположение `.py` файла |
 
 ---
 
-## Development
+## Разработка
 
-**Run in development mode:**
 ```bash
+# Режим разработки
 npm run dev
-```
 
-**Build for production:**
-```bash
+# Сборка
 npm run build
-```
 
-**Start production build:**
-```bash
+# Запуск собранной версии
 npm start
 ```
 
 ---
 
-## Getting Bot Token from BotFather
+## Получение токена бота
 
-1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` command
-3. Follow the prompts to name your bot
-4. Copy the token provided (looks like: `123456789:ABCdefGHI...`)
-5. Paste it in your `.env` file
+1. Открыть Telegram и найти [@BotFather](https://t.me/BotFather)
+2. Отправить `/newbot`
+3. Следовать инструкциям для создания бота
+4. Скопировать токен (формат: `123456789:ABCdefGHI...`)
+5. Вставить в `.env` файл
 
 ---
 
-## License
+## Лицензия
 
 ISC
-

@@ -19,6 +19,7 @@ const MAP_NAMES: Record<string, string> = {
   departure: '🏔️ Вершина',
   expanse: '🌄 Просторы',
   expanse_solo: '🎯 Соло просторы',
+  expanse_duo: '👥 Дуо просторы',
 };
 
 // Server address
@@ -177,10 +178,13 @@ bot.onText(/\/help/, (msg) => {
 📖 *Список команд DH Dogs Bot*
 
 🎮 *Управление сервером:*
-/run — Выбор и запуск игрового сервера
+/run — Запуск игрового сервера
   • 🏔️ Вершина (Departure)
   • 🌄 Просторы (Expanse)
-  • 🎯 Соло просторы (Expanse Solo)
+
+/testing — Тестовые режимы
+  • 🎯 Соло просторы (1 игрок)
+  • 👥 Дуо просторы (2 игрока)
 
 /stop — Принудительная остановка сервера
   Завершает текущий запущенный процесс
@@ -272,14 +276,32 @@ bot.onText(/\/run/, (msg) => {
           { text: '🏔️ Вершина', callback_data: 'run_departure' },
           { text: '🌄 Просторы', callback_data: 'run_expanse' },
         ],
+      ],
+    },
+  };
+
+  bot.sendMessage(chatId, '🎯 *Выберите карту для запуска:*', {
+    parse_mode: 'Markdown',
+    ...options,
+  });
+});
+
+// Command 6: /testing - Testing modes (solo/duo)
+bot.onText(/\/testing/, (msg) => {
+  const chatId = msg.chat.id;
+
+  const options: TelegramBot.SendMessageOptions = {
+    reply_markup: {
+      inline_keyboard: [
         [
           { text: '🎯 Соло просторы', callback_data: 'run_expanse_solo' },
+          { text: '👥 Дуо просторы', callback_data: 'run_expanse_duo' },
         ],
       ],
     },
   };
 
-  bot.sendMessage(chatId, '🎯 *Выберите скрипт для запуска:*', {
+  bot.sendMessage(chatId, '🧪 *Тестовые режимы:*', {
     parse_mode: 'Markdown',
     ...options,
   });
@@ -307,6 +329,9 @@ bot.on('callback_query', async (callbackQuery) => {
   } else if (data === 'run_expanse_solo') {
     scriptName = 'run-expanse_solo.bat';
     displayName = '🎯 Соло просторы';
+  } else if (data === 'run_expanse_duo') {
+    scriptName = 'run-expanse_duo.bat';
+    displayName = '👥 Дуо просторы';
   } else {
     return;
   }
@@ -368,7 +393,7 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-// Command 6: /dog - Random dog facts
+// Command 7: /dog - Random dog facts
 const dogFacts = [
   '🐕 Dogs have a sense of smell that is 40 times better than humans!',
   '🐕 A dog\'s nose print is unique, much like a human fingerprint.',
