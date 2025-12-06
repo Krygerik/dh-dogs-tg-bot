@@ -26,9 +26,9 @@ echo %PID%> "%~dp0server.pid"
 echo departure> "%~dp0server.map"
 
 :: Run the Python loader script (if exists in server directory)
-if exist "loader_for_departure.py" (
+if exist "loader_for_departure_tg_bot.py" (
     echo [INFO] Running Python loader...
-    python "loader_for_departure.py"
+    python "loader_for_departure_tg_bot.py"
 )
 
 echo [OK] Departure server started. PID: %PID% [%SERVER_ENV%]
