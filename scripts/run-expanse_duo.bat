@@ -26,9 +26,9 @@ echo %PID%> "%~dp0server.pid"
 echo expanse_duo> "%~dp0server.map"
 
 :: Run the Python loader script (if exists in server directory)
-if exist "loader_for_expanse_tg_bot.py" (
+if exist "scripts_for_tg_bot/loader_for_expanse_tg_bot.py" (
     echo [INFO] Running Python loader...
-    python "loader_for_expanse_tg_bot.py"
+    python "scripts_for_tg_bot/loader_for_solo_or_duo.py"
 )
 
 echo [OK] Expanse Duo server started. PID: %PID% [%SERVER_ENV%]
