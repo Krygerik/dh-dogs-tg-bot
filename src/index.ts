@@ -101,6 +101,28 @@ function buildMapArg(mapValue: string, sessionParams: string, port: number): str
   return params.length > 0 ? `${mapValue}?${params}` : mapValue;
 }
 
+function escapeMarkdown(text: string): string {
+  return text.replace(/([_*`\[])/g, '\\$1');
+}
+
+function stripMarkdown(text: string): string {
+  return text.replace(/[*_`]/g, '');
+}
+
+function sendMarkdownSafe(
+  bot: TelegramBot,
+  chatId: number,
+  text: string,
+  options: TelegramBot.SendMessageOptions = {}
+): void {
+  bot
+    .sendMessage(chatId, text, { ...options, parse_mode: 'Markdown' })
+    .catch(() => {
+      const { parse_mode, ...rest } = options;
+      bot.sendMessage(chatId, stripMarkdown(text), rest);
+    });
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -568,9 +590,10 @@ console.log('🎮 Dread Hunger Server Bot is starting...');
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const userName = msg.from?.first_name || 'Игрок';
+  const safeUserName = escapeMarkdown(userName);
 
   const welcomeMessage = `
-🎮 *Добро пожаловать, ${userName}!*
+🎮 *Добро пожаловать, ${safeUserName}!*
 
 Это бот для управления сервером *Dread Hunger*.
 
@@ -579,7 +602,7 @@ bot.onText(/\/start/, (msg) => {
 Используй /help для списка команд
   `;
 
-  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
+  sendMarkdownSafe(bot, chatId, welcomeMessage);
 });
 
 // Command 2: /help - Show all commands
@@ -602,7 +625,7 @@ bot.onText(/\/help/, (msg) => {
 /dog — Случайный факт о собаках 🐕
   `;
 
-  bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+  sendMarkdownSafe(bot, chatId, helpMessage);
 });
 
 // Command 3: /status - Show server status
@@ -610,11 +633,10 @@ bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
   const sessions = serverManager.listSessions();
   if (sessions.length === 0) {
-    bot.sendMessage(
+    sendMarkdownSafe(
+      bot,
       chatId,
-      `📊 *Статус сервера*\n\n` +
-        `🔴 Сервер не запущен`,
-      { parse_mode: 'Markdown' }
+      `📊 *Статус сервера*\n\n` + `🔴 Сервер не запущен`
     );
     return;
   }
@@ -622,8 +644,9 @@ bot.onText(/\/status/, async (msg) => {
   const lines = sessions
     .map((session) => {
       const uptime = formatDuration(Date.now() - session.startedAt.getTime());
+      const safeMapName = escapeMarkdown(session.map.name);
       return [
-        `🗺️ Карта: *${session.map.name}*`,
+        `🗺️ Карта: *${safeMapName}*`,
         `🔢 PID: \`${session.pid}\``,
         `🌐 IP: \`${config.publicIp}\``,
         `🔌 Порт: \`${session.port}\``,
@@ -632,12 +655,12 @@ bot.onText(/\/status/, async (msg) => {
     })
     .join('\n\n');
 
-  bot.sendMessage(
+  sendMarkdownSafe(
+    bot,
     chatId,
     `📊 *Статус сервера*\n\n` +
       `🟢 Активные сессии: ${sessions.length}\n\n` +
-      lines,
-    { parse_mode: 'Markdown' }
+      lines
   );
 });
 
@@ -646,7 +669,7 @@ bot.onText(/\/stop/, async (msg) => {
   const chatId = msg.chat.id;
   const sessions = serverManager.listSessions();
   if (sessions.length === 0) {
-    bot.sendMessage(chatId, '❌ Сервер не запущен.', { parse_mode: 'Markdown' });
+    sendMarkdownSafe(bot, chatId, '❌ Сервер не запущен.');
     return;
   }
 
@@ -661,10 +684,7 @@ bot.onText(/\/stop/, async (msg) => {
     },
   };
 
-  bot.sendMessage(chatId, '🛑 *Выберите сессию для остановки:*', {
-    parse_mode: 'Markdown',
-    ...options,
-  });
+  sendMarkdownSafe(bot, chatId, '🛑 *Выберите сессию для остановки:*', options);
 });
 
 // Command 5: /log - Show realtime log tail
@@ -672,7 +692,7 @@ bot.onText(/\/log/, async (msg) => {
   const chatId = msg.chat.id;
   const sessions = serverManager.listSessions();
   if (sessions.length === 0) {
-    bot.sendMessage(chatId, '❌ Сервер не запущен.', { parse_mode: 'Markdown' });
+    sendMarkdownSafe(bot, chatId, '❌ Сервер не запущен.');
     return;
   }
 
@@ -687,10 +707,7 @@ bot.onText(/\/log/, async (msg) => {
     },
   };
 
-  bot.sendMessage(chatId, '📜 *Выберите сессию для просмотра лога:*', {
-    parse_mode: 'Markdown',
-    ...options,
-  });
+  sendMarkdownSafe(bot, chatId, '📜 *Выберите сессию для просмотра лога:*', options);
 });
 
 // Command 6: /run - Choose and run map
@@ -708,10 +725,7 @@ bot.onText(/\/run/, (msg) => {
     },
   };
 
-  bot.sendMessage(chatId, '🎯 *Выберите карту для запуска:*', {
-    parse_mode: 'Markdown',
-    ...options,
-  });
+  sendMarkdownSafe(bot, chatId, '🎯 *Выберите карту для запуска:*', options);
 });
 
 // Command 7: /testing - Choose solo/duo for test run
@@ -729,10 +743,7 @@ bot.onText(/\/testing/, (msg) => {
     },
   };
 
-  bot.sendMessage(chatId, '🧪 *Выберите режим тестирования:*', {
-    parse_mode: 'Markdown',
-    ...options,
-  });
+  sendMarkdownSafe(bot, chatId, '🧪 *Выберите режим тестирования:*', options);
 });
 
 // Handle button callbacks
@@ -747,23 +758,25 @@ bot.on('callback_query', async (callbackQuery) => {
 
   if (data.startsWith('run:')) {
     const mapName = data.replace('run:', '').trim();
-    bot.sendMessage(chatId, `⏳ Запускаю *${mapName}*...`, { parse_mode: 'Markdown' });
+    const safeMapName = escapeMarkdown(mapName);
+    sendMarkdownSafe(bot, chatId, `⏳ Запускаю *${safeMapName}*...`);
     try {
       const session = await serverManager.startSession(mapName);
-      bot.sendMessage(
+      const safeSessionName = escapeMarkdown(session.map.name);
+      sendMarkdownSafe(
+        bot,
         chatId,
-        `✅ *${session.map.name}* успешно запущен!\n\n` +
+        `✅ *${safeSessionName}* успешно запущен!\n\n` +
           `PID: \`${session.pid}\`\n` +
           `🌐 IP: \`${config.publicIp}\`\n` +
-          `🔌 Порт: \`${session.port}\``,
-        { parse_mode: 'Markdown' }
+          `🔌 Порт: \`${session.port}\``
       );
     } catch (error) {
-      bot.sendMessage(
+      sendMarkdownSafe(
+        bot,
         chatId,
-        `❌ Не удалось запустить *${mapName}*.\n\n` +
-          `Причина: ${(error as Error).message}`,
-        { parse_mode: 'Markdown' }
+        `❌ Не удалось запустить *${safeMapName}*.\n\n` +
+          `Причина: ${escapeMarkdown((error as Error).message)}`
       );
     }
     return;
@@ -777,27 +790,29 @@ bot.on('callback_query', async (callbackQuery) => {
       testMode === 'duo'
         ? 'maxplayers=2?thralls=2'
         : 'maxplayers=1?thralls=1';
-    bot.sendMessage(
+    const safeMapName = escapeMarkdown(mapName);
+    sendMarkdownSafe(
+      bot,
       chatId,
-      `⏳ Тестовый запуск *${mapName}* (${testMode})...`,
-      { parse_mode: 'Markdown' }
+      `⏳ Тестовый запуск *${safeMapName}* (${testMode})...`
     );
     try {
       const session = await serverManager.startSession(mapName, testParams, 'test');
-      bot.sendMessage(
+      const safeSessionName = escapeMarkdown(session.map.name);
+      sendMarkdownSafe(
+        bot,
         chatId,
-        `✅ *${session.map.name}* успешно запущен (тест)!\n\n` +
+        `✅ *${safeSessionName}* успешно запущен (тест)!\n\n` +
           `PID: \`${session.pid}\`\n` +
           `🌐 IP: \`${config.publicIp}\`\n` +
-          `🔌 Порт: \`${session.port}\``,
-        { parse_mode: 'Markdown' }
+          `🔌 Порт: \`${session.port}\``
       );
     } catch (error) {
-      bot.sendMessage(
+      sendMarkdownSafe(
+        bot,
         chatId,
-        `❌ Не удалось запустить *${mapName}* (тест).\n\n` +
-          `Причина: ${(error as Error).message}`,
-        { parse_mode: 'Markdown' }
+        `❌ Не удалось запустить *${safeMapName}* (тест).\n\n` +
+          `Причина: ${escapeMarkdown((error as Error).message)}`
       );
     }
     return;
@@ -816,10 +831,7 @@ bot.on('callback_query', async (callbackQuery) => {
       },
     };
 
-    bot.sendMessage(chatId, '🧪 *Выберите карту для тестового запуска:*', {
-      parse_mode: 'Markdown',
-      ...options,
-    });
+    sendMarkdownSafe(bot, chatId, '🧪 *Выберите карту для тестового запуска:*', options);
     return;
   }
 
@@ -828,19 +840,13 @@ bot.on('callback_query', async (callbackQuery) => {
     const port = Number.parseInt(portStr, 10);
     if (Number.isNaN(port)) return;
 
-    bot.sendMessage(chatId, `⏳ Останавливаю сессию на порту \`${port}\`...`, {
-      parse_mode: 'Markdown',
-    });
+    sendMarkdownSafe(bot, chatId, `⏳ Останавливаю сессию на порту \`${port}\`...`);
 
     const killed = await serverManager.stopSession(port);
     if (killed) {
-      bot.sendMessage(chatId, `✅ Сессия на порту \`${port}\` остановлена.`, {
-        parse_mode: 'Markdown',
-      });
+      sendMarkdownSafe(bot, chatId, `✅ Сессия на порту \`${port}\` остановлена.`);
     } else {
-      bot.sendMessage(chatId, `❌ Не удалось остановить сессию на порту \`${port}\`.`, {
-        parse_mode: 'Markdown',
-      });
+      sendMarkdownSafe(bot, chatId, `❌ Не удалось остановить сессию на порту \`${port}\`.`);
     }
   }
 
@@ -851,15 +857,14 @@ bot.on('callback_query', async (callbackQuery) => {
 
     const session = serverManager.listSessions().find((item) => item.port === port);
     if (!session) {
-      bot.sendMessage(chatId, '❌ Сессия не найдена.', { parse_mode: 'Markdown' });
+      sendMarkdownSafe(bot, chatId, '❌ Сессия не найдена.');
       return;
     }
 
     const tail = readLogTail(session.logPath);
-    const header = `📜 *Лог сессии ${session.map.name} (${session.port})*`;
-    const message = `${header}\n\n\`\`\`\n${tail || 'Лог пуст'}\n\`\`\``;
-
-    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    const header = `📜 Лог сессии ${session.map.name} (${session.port})`;
+    const message = `${header}\n\n${tail || 'Лог пуст'}`;
+    bot.sendMessage(chatId, message);
   }
 });
 
@@ -883,7 +888,7 @@ bot.onText(/\/dog/, (msg) => {
   const chatId = msg.chat.id;
   const randomFact = dogFacts[Math.floor(Math.random() * dogFacts.length)];
 
-  bot.sendMessage(chatId, `*Random Dog Fact:*\n\n${randomFact}`, { parse_mode: 'Markdown' });
+  sendMarkdownSafe(bot, chatId, `*Random Dog Fact:*\n\n${randomFact}`);
 });
 
 // Handle errors
