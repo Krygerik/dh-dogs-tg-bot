@@ -8,6 +8,7 @@ import readline from 'readline';
 dotenv.config();
 
 const LOGS_DIR = path.join(process.cwd(), 'logs');
+const MAX_LOG_FILES = 20;
 
 type MapConfig = {
   name: string;
@@ -229,6 +230,28 @@ function ensureLogsDir(): void {
   }
 }
 
+function cleanupOldLogs(): void {
+  ensureLogsDir();
+  const files = fs
+    .readdirSync(LOGS_DIR)
+    .map((name) => ({
+      name,
+      fullPath: path.join(LOGS_DIR, name),
+      stat: fs.statSync(path.join(LOGS_DIR, name)),
+    }))
+    .filter((entry) => entry.stat.isFile())
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+
+  if (files.length <= MAX_LOG_FILES) return;
+
+  for (const entry of files.slice(MAX_LOG_FILES)) {
+    try {
+      fs.unlinkSync(entry.fullPath);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
 function makeLogFileName(mapName: string, port: number): string {
   const safeName = mapName.replace(/[^\w.-]+/g, '_');
   return `session_${safeName}_${port}_${Date.now()}.log`;
@@ -240,6 +263,7 @@ function attachRealtimeLogging(
   port: number
 ): string {
   ensureLogsDir();
+  cleanupOldLogs();
   const logPath = path.join(LOGS_DIR, makeLogFileName(mapName, port));
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
 
@@ -510,11 +534,6 @@ function buildConfig(): ServerConfig {
     throw new Error('MAX_SESSIONS must be a non-negative integer');
   }
 
-  const initTimeoutMs = Number.parseInt(process.env.INIT_TIMEOUT_MS ?? '30000', 10);
-  if (Number.isNaN(initTimeoutMs) || initTimeoutMs <= 0) {
-    throw new Error('INIT_TIMEOUT_MS must be a positive integer');
-  }
-
   const resolvedBinaryPath = resolveBinaryPath(binaryPath);
 
   return {
@@ -525,10 +544,10 @@ function buildConfig(): ServerConfig {
     maxSessions,
     maps: parseMaps(mapsRaw),
     sessionParams: process.env.SESSION_PARAMS ?? 'maxplayers=8',
-    initSignature: process.env.INIT_SIGNATURE ?? DEFAULT_INIT_SIGNATURE,
-    initTimeoutMs,
+    initSignature: DEFAULT_INIT_SIGNATURE,
+    initTimeoutMs: 30000,
     fridaPath: process.env.FRIDA_PATH ?? '',
-    fridaInitSignature: process.env.FRIDA_INIT_SIGNATURE ?? 'Frida scripts have been injected.',
+    fridaInitSignature: 'Frida scripts have been injected.',
   };
 }
 
@@ -606,8 +625,8 @@ bot.onText(/\/status/, async (msg) => {
       return [
         `🗺️ Карта: *${session.map.name}*`,
         `🔢 PID: \`${session.pid}\``,
+        `🌐 IP: \`${config.publicIp}\``,
         `🔌 Порт: \`${session.port}\``,
-        `🌐 Адрес: \`${config.publicIp}:${session.port}\``,
         `⏱️ Аптайм: \`${uptime}\``,
       ].join('\n');
     })
@@ -695,22 +714,22 @@ bot.onText(/\/run/, (msg) => {
   });
 });
 
-// Command 7: /testing - Choose and run map with test params
+// Command 7: /testing - Choose solo/duo for test run
 bot.onText(/\/testing/, (msg) => {
   const chatId = msg.chat.id;
 
   const options: TelegramBot.SendMessageOptions = {
     reply_markup: {
-      inline_keyboard: buildInlineKeyboard(
-        config.maps.map((map) => ({
-          text: map.name,
-          data: `run_test:${map.name}`,
-        }))
-      ),
+      inline_keyboard: [
+        [
+          { text: '🎯 Solo (1/1)', callback_data: 'testing_solo' },
+          { text: '👥 Duo (2/2)', callback_data: 'testing_duo' },
+        ],
+      ],
     },
   };
 
-  bot.sendMessage(chatId, '🧪 *Выберите карту для тестового запуска:*', {
+  bot.sendMessage(chatId, '🧪 *Выберите режим тестирования:*', {
     parse_mode: 'Markdown',
     ...options,
   });
@@ -735,8 +754,8 @@ bot.on('callback_query', async (callbackQuery) => {
         chatId,
         `✅ *${session.map.name}* успешно запущен!\n\n` +
           `PID: \`${session.pid}\`\n` +
-          `🔌 Порт: \`${session.port}\`\n` +
-          `🌐 Адрес: \`${config.publicIp}:${session.port}\``,
+          `🌐 IP: \`${config.publicIp}\`\n` +
+          `🔌 Порт: \`${session.port}\``,
         { parse_mode: 'Markdown' }
       );
     } catch (error) {
@@ -751,17 +770,26 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 
   if (data.startsWith('run_test:')) {
-    const mapName = data.replace('run_test:', '').trim();
-    const testParams = 'maxplayers=1?thralls=1';
-    bot.sendMessage(chatId, `⏳ Тестовый запуск *${mapName}*...`, { parse_mode: 'Markdown' });
+    const parts = data.replace('run_test:', '').trim().split(':');
+    const testMode = parts[0];
+    const mapName = parts.slice(1).join(':').trim();
+    const testParams =
+      testMode === 'duo'
+        ? 'maxplayers=2?thralls=2'
+        : 'maxplayers=1?thralls=1';
+    bot.sendMessage(
+      chatId,
+      `⏳ Тестовый запуск *${mapName}* (${testMode})...`,
+      { parse_mode: 'Markdown' }
+    );
     try {
       const session = await serverManager.startSession(mapName, testParams, 'test');
       bot.sendMessage(
         chatId,
         `✅ *${session.map.name}* успешно запущен (тест)!\n\n` +
           `PID: \`${session.pid}\`\n` +
-          `🔌 Порт: \`${session.port}\`\n` +
-          `🌐 Адрес: \`${config.publicIp}:${session.port}\``,
+          `🌐 IP: \`${config.publicIp}\`\n` +
+          `🔌 Порт: \`${session.port}\``,
         { parse_mode: 'Markdown' }
       );
     } catch (error) {
@@ -772,6 +800,26 @@ bot.on('callback_query', async (callbackQuery) => {
         { parse_mode: 'Markdown' }
       );
     }
+    return;
+  }
+
+  if (data === 'testing_solo' || data === 'testing_duo') {
+    const mode = data === 'testing_duo' ? 'duo' : 'solo';
+    const options: TelegramBot.SendMessageOptions = {
+      reply_markup: {
+        inline_keyboard: buildInlineKeyboard(
+          config.maps.map((map) => ({
+            text: map.name,
+            data: `run_test:${mode}:${map.name}`,
+          }))
+        ),
+      },
+    };
+
+    bot.sendMessage(chatId, '🧪 *Выберите карту для тестового запуска:*', {
+      parse_mode: 'Markdown',
+      ...options,
+    });
     return;
   }
 
