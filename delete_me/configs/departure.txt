@@ -1,0 +1,8 @@
+patches/randroles.js
+patches/fullspell.js
+patches/spellboost.js
+patches/spell_cast_start.js
+patches/quests_2.js
+patches/spirit_walk_on_demand_ver2.js
+patches/charge_one_on_start.js
+patches/arrows.js
