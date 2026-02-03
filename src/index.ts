@@ -4,6 +4,8 @@ import { exec, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
+import http from 'http';
+import { URL } from 'url';
 
 dotenv.config();
 
@@ -43,6 +45,10 @@ type RunningSession = GameSession & {
 
 const DEFAULT_INIT_SIGNATURE =
   'LogInit: Display: Engine is initialized. Leaving FEngineLoop::Init()';
+const API_PORT = 8787;
+const API_TOKEN = (process.env.API_TOKEN ?? '').trim();
+const TEST_PARAMS_SOLO = 'maxplayers=1?thralls=1';
+const TEST_PARAMS_DUO = 'maxplayers=2?thralls=2';
 
 function parsePortSpec(raw: string): number[] {
   const ports = new Set<number>();
@@ -121,6 +127,38 @@ function sendMarkdownSafe(
       const { parse_mode, ...rest } = options;
       bot.sendMessage(chatId, stripMarkdown(text), rest);
     });
+}
+
+function sendJson(res: http.ServerResponse, statusCode: number, payload: unknown) {
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+    });
+    req.on('end', () => {
+      if (!data) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(data));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function isAuthorized(req: http.IncomingMessage): boolean {
+  if (!API_TOKEN) return true;
+  const token = req.headers['x-api-token'];
+  return typeof token === 'string' && token === API_TOKEN;
 }
 
 function formatDuration(ms: number): string {
@@ -585,6 +623,123 @@ const bot = new TelegramBot(process.env.BOT_TOKEN as string, { polling: true });
 const serverManager = new ServerManager(config);
 
 console.log('🎮 Dread Hunger Server Bot is starting...');
+
+function createApiServer() {
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Token');
+
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    if (!isAuthorized(req)) {
+      sendJson(res, 401, { ok: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!req.url) {
+      sendJson(res, 400, { ok: false, error: 'Invalid URL' });
+      return;
+    }
+
+    const url = new URL(req.url, `http://localhost:${API_PORT}`);
+    try {
+      if (req.method === 'GET' && url.pathname === '/status') {
+        const sessions = serverManager.listSessions().map((session) => ({
+          mapName: session.map.name,
+          mapValue: session.map.serverValue,
+          port: session.port,
+          pid: session.pid,
+          ip: config.publicIp,
+          startedAt: session.startedAt.toISOString()
+        }));
+        sendJson(res, 200, { ok: true, sessions });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/maps') {
+        const maps = config.maps.map((map) => ({
+          name: map.name,
+          serverValue: map.serverValue
+        }));
+        sendJson(res, 200, { ok: true, maps });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/run') {
+        const body = await readJsonBody(req);
+        const mapName = body.mapName;
+        if (typeof mapName !== 'string' || mapName.length === 0) {
+          sendJson(res, 400, { ok: false, error: 'mapName is required' });
+          return;
+        }
+        const session = await serverManager.startSession(mapName);
+        sendJson(res, 200, {
+          ok: true,
+          session: {
+            mapName: session.map.name,
+            mapValue: session.map.serverValue,
+            port: session.port,
+            pid: session.pid,
+            ip: config.publicIp,
+            startedAt: session.startedAt.toISOString()
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/testing') {
+        const body = await readJsonBody(req);
+        const mapName = body.mapName;
+        const mode = typeof body.mode === 'string' ? body.mode : 'solo';
+        if (typeof mapName !== 'string' || mapName.length === 0) {
+          sendJson(res, 400, { ok: false, error: 'mapName is required' });
+          return;
+        }
+        const params = mode === 'duo' ? TEST_PARAMS_DUO : TEST_PARAMS_SOLO;
+        const session = await serverManager.startSession(mapName, params, 'test');
+        sendJson(res, 200, {
+          ok: true,
+          session: {
+            mapName: session.map.name,
+            mapValue: session.map.serverValue,
+            port: session.port,
+            pid: session.pid,
+            ip: config.publicIp,
+            startedAt: session.startedAt.toISOString()
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/stop') {
+        const body = await readJsonBody(req);
+        const port = Number.parseInt(String(body.port ?? ''), 10);
+        if (Number.isNaN(port)) {
+          sendJson(res, 400, { ok: false, error: 'port is required' });
+          return;
+        }
+        const ok = await serverManager.stopSession(port);
+        sendJson(res, 200, { ok });
+        return;
+      }
+
+      sendJson(res, 404, { ok: false, error: 'Not found' });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: (error as Error).message });
+    }
+  });
+
+  server.listen(API_PORT, () => {
+    console.log(`🌐 API listening on http://0.0.0.0:${API_PORT}`);
+  });
+}
+
+createApiServer();
 
 // Command 1: /start - Welcome message
 bot.onText(/\/start/, (msg) => {

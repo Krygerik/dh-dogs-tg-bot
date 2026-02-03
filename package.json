@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "gen-token": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
   },
   "keywords": ["telegram", "bot"],
   "author": "",

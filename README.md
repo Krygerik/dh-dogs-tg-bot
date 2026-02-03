@@ -53,6 +53,9 @@ MAX_SESSIONS=2
 MAPS=🏔️ Вершина=Departure_Persistent,🌄 Просторы=Expanse_Persistent
 SESSION_PARAMS=daysbeforeblizzard=3?maxplayers=8?thralls=2
 FRIDA_PATH=.\frida\python_loader.bat
+STEAM_APP_ID=1418630
+APP_ENV=dev
+API_TOKEN=change_me
 ```
 
 ### 3. Запустить бота
@@ -76,6 +79,9 @@ start-bot.bat
 | `MAPS` | Карты `Имя=ServerValue` | `Summit=Departure_Persistent` |
 | `SESSION_PARAMS` | Параметры сессии | `maxplayers=8?thralls=2` |
 | `FRIDA_PATH` | Путь к Frida инжектору (опц.) | `.\frida\python_loader.bat` |
+| `STEAM_APP_ID` | Steam AppID для ссылок подключения | `1418630` |
+| `APP_ENV` | Режим окружения | `dev` или `prod` |
+| `API_TOKEN` | Токен API | `change_me` |
 
 ---
 
@@ -88,6 +94,19 @@ start-bot.bat
 ```
 
 ---
+
+## Внешний API для клиента
+
+Бот поднимает HTTP API на `0.0.0.0:8787` (фиксированный порт).
+
+Эндпоинты:
+- `GET /status` — активные сессии
+- `GET /maps` — список карт
+- `POST /run` — запуск сессии `{ "mapName": "..." }`
+- `POST /testing` — тестовый запуск `{ "mapName": "...", "mode": "solo|duo" }`
+- `POST /stop` — остановка сессии `{ "port": 7777 }`
+
+Если задан `API_TOKEN`, нужно отправлять заголовок `X-API-Token`.
 
 ## Структура проекта
 
