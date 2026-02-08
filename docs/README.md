@@ -4,3 +4,6 @@
 
 Документация по фичам:
 - `docs/features/`
+
+Справочники:
+- `docs/reference/`

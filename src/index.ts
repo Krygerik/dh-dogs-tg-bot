@@ -17,11 +17,23 @@ type MapConfig = {
   serverValue: string;
 };
 
+type MapReference = {
+  name: string;
+  serverValue: string;
+  defaultCollection?: string;
+};
+
 type ModInfo = {
   id: string;
   name: string;
   scriptPath: string;
   description: string;
+};
+
+type ModCollection = {
+  id: string;
+  name: string;
+  mods: string[];
 };
 
 type ServerConfig = {
@@ -44,6 +56,7 @@ type GameSession = {
   map: MapConfig;
   startedAt: Date;
   logPath: string;
+  mods: string[];
 };
 
 type RunningSession = GameSession & {
@@ -57,6 +70,10 @@ const API_TOKEN = (process.env.API_TOKEN ?? '').trim();
 const TEST_PARAMS_SOLO = 'maxplayers=1?thralls=1';
 const TEST_PARAMS_DUO = 'maxplayers=2?thralls=2';
 const STABLE_DIR = path.join(process.cwd(), 'patches', 'stable');
+const COLLECTIONS_DIR = path.join(process.cwd(), 'patches', 'alllready_configs');
+const MAPS_REF_PATH = path.join(process.cwd(), 'reference', 'maps.json');
+const MAPS_RU_PATH = path.join(process.cwd(), 'reference', 'maps.ru.json');
+const MAPS_COLLECTIONS_PATH = path.join(process.cwd(), 'reference', 'map-collections.json');
 
 function listStableMods(): ModInfo[] {
   // TODO: consider caching if this becomes a hotspot.
@@ -91,6 +108,48 @@ function listStableMods(): ModInfo[] {
   return mods;
 }
 
+function listModCollections(mods: ModInfo[]): ModCollection[] {
+  if (!fs.existsSync(COLLECTIONS_DIR)) {
+    return [];
+  }
+  const modsByScriptPath = new Map(mods.map((mod) => [mod.scriptPath, mod.id]));
+  const entries = fs.readdirSync(COLLECTIONS_DIR, { withFileTypes: true });
+  const collections: ModCollection[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.txt')) continue;
+    const collectionId = entry.name.replace(/\.txt$/i, '');
+    const filePath = path.join(COLLECTIONS_DIR, entry.name);
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const modsSet = new Set<string>();
+
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const normalized = trimmed.replace(/\\/g, '/');
+      const modId = modsByScriptPath.get(normalized);
+      if (modId) {
+        modsSet.add(modId);
+        continue;
+      }
+      const parts = normalized.split('/');
+      const stableIdx = parts.indexOf('stable');
+      if (stableIdx !== -1 && parts.length > stableIdx + 1) {
+        modsSet.add(parts[stableIdx + 1]);
+      }
+    }
+
+    collections.push({
+      id: collectionId,
+      name: collectionId,
+      mods: [...modsSet],
+    });
+  }
+
+  collections.sort((a, b) => a.name.localeCompare(b.name));
+  return collections;
+}
+
 function resolveModScripts(modIds: string[]): { scripts: string[]; unknown: string[] } {
   const catalog = listStableMods();
   const map = new Map(catalog.map((mod) => [mod.id, mod]));
@@ -123,6 +182,38 @@ function parseMods(value: unknown): { mods: string[]; error?: string } {
     if (trimmed) mods.push(trimmed);
   }
   return { mods };
+}
+
+function loadMapReferences(): MapReference[] {
+  try {
+    if (!fs.existsSync(MAPS_REF_PATH)) return [];
+    const raw = fs.readFileSync(MAPS_REF_PATH, 'utf8');
+    const data = JSON.parse(raw) as { maps?: string[] };
+    const mapList = Array.isArray(data.maps) ? data.maps : [];
+    if (mapList.length === 0) return [];
+
+    let localized: Record<string, string> = {};
+    if (fs.existsSync(MAPS_RU_PATH)) {
+      const rawRu = fs.readFileSync(MAPS_RU_PATH, 'utf8');
+      const ruData = JSON.parse(rawRu) as Record<string, string>;
+      localized = ruData || {};
+    }
+
+    let collections: Record<string, string> = {};
+    if (fs.existsSync(MAPS_COLLECTIONS_PATH)) {
+      const rawCollections = fs.readFileSync(MAPS_COLLECTIONS_PATH, 'utf8');
+      const dataCollections = JSON.parse(rawCollections) as Record<string, string>;
+      collections = dataCollections || {};
+    }
+
+    return mapList.map((serverValue) => ({
+      serverValue,
+      name: localized[serverValue] ?? serverValue,
+      defaultCollection: collections[serverValue],
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function parsePortSpec(raw: string): number[] {
@@ -160,20 +251,6 @@ function parsePortSpec(raw: string): number[] {
     }
   }
   return [...ports];
-}
-
-function parseMaps(raw: string): MapConfig[] {
-  const maps: MapConfig[] = [];
-  for (const part of raw.split(',')) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const [name, serverValue] = trimmed.split('=').map((v) => v.trim());
-    if (!name || !serverValue) {
-      throw new Error(`Invalid map entry: ${trimmed}`);
-    }
-    maps.push({ name, serverValue });
-  }
-  return maps;
 }
 
 function buildMapArg(mapValue: string, sessionParams: string, port: number): string {
@@ -472,9 +549,21 @@ class ServerManager {
     mapName: string,
     sessionParamsOverride?: string,
     fridaMode?: string,
-    modScripts?: string[]
+    modScripts?: string[],
+    modIds?: string[]
   ): Promise<GameSession> {
-    const map = this.config.maps.find((item) => item.name === mapName);
+    let map = this.config.maps.find(
+      (item) => item.name === mapName || item.serverValue === mapName
+    );
+    if (!map) {
+      const refs = loadMapReferences();
+      const refMatch = refs.find(
+        (item) => item.serverValue === mapName || item.name === mapName
+      );
+      if (refMatch) {
+        map = { name: refMatch.name, serverValue: refMatch.serverValue };
+      }
+    }
     if (!map) {
       throw new Error(`Unknown map: ${mapName}`);
     }
@@ -529,6 +618,7 @@ class ServerManager {
       map,
       startedAt: new Date(),
       logPath,
+      mods: modIds ?? [],
       process: child,
     };
 
@@ -655,7 +745,6 @@ function buildConfig(): ServerConfig {
   const botToken = process.env.BOT_TOKEN;
   const publicIp = process.env.PUBLIC_IP;
   const binaryPath = process.env.BINARY_PATH;
-  const mapsRaw = process.env.MAPS;
 
   if (!botToken) {
     throw new Error('BOT_TOKEN is not set in .env file');
@@ -666,9 +755,6 @@ function buildConfig(): ServerConfig {
   if (!binaryPath) {
     throw new Error('BINARY_PATH is not set in .env file');
   }
-  if (!mapsRaw) {
-    throw new Error('MAPS is not set in .env file');
-  }
 
   const ports = parsePortSpec(process.env.PORTS ?? '7777');
   const maxSessions = Number.parseInt(process.env.MAX_SESSIONS ?? '0', 10);
@@ -677,6 +763,13 @@ function buildConfig(): ServerConfig {
   }
 
   const resolvedBinaryPath = resolveBinaryPath(binaryPath);
+  const mapRefs = loadMapReferences().map((item) => ({
+    name: item.name,
+    serverValue: item.serverValue,
+  }));
+  if (mapRefs.length === 0) {
+    throw new Error('Map references are empty. Check reference/maps.json');
+  }
 
   return {
     publicIp,
@@ -684,7 +777,7 @@ function buildConfig(): ServerConfig {
     binaryDir: path.dirname(resolvedBinaryPath),
     ports,
     maxSessions,
-    maps: parseMaps(mapsRaw),
+    maps: mapRefs,
     sessionParams: process.env.SESSION_PARAMS ?? 'maxplayers=8',
     initSignature: DEFAULT_INIT_SIGNATURE,
     initTimeoutMs: 30000,
@@ -737,24 +830,30 @@ function createApiServer() {
           port: session.port,
           pid: session.pid,
           ip: config.publicIp,
-          startedAt: session.startedAt.toISOString()
+          startedAt: session.startedAt.toISOString(),
+          mods: session.mods ?? []
         }));
         sendJson(res, 200, { ok: true, sessions });
         return;
       }
 
       if (req.method === 'GET' && url.pathname === '/maps') {
-        const maps = config.maps.map((map) => ({
-          name: map.name,
-          serverValue: map.serverValue
-        }));
+        const refs = loadMapReferences();
+        const maps =
+          refs.length > 0
+            ? refs
+            : config.maps.map((map) => ({
+                name: map.name,
+                serverValue: map.serverValue
+              }));
         sendJson(res, 200, { ok: true, maps });
         return;
       }
 
       if (req.method === 'GET' && url.pathname === '/mods') {
         const mods = listStableMods();
-        sendJson(res, 200, { ok: true, mods });
+        const collections = listModCollections(mods);
+        sendJson(res, 200, { ok: true, mods, collections });
         return;
       }
 
@@ -775,7 +874,7 @@ function createApiServer() {
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
-        const session = await serverManager.startSession(mapName, undefined, undefined, scripts);
+        const session = await serverManager.startSession(mapName, undefined, undefined, scripts, mods);
         sendJson(res, 200, {
           ok: true,
           session: {
@@ -784,7 +883,8 @@ function createApiServer() {
             port: session.port,
             pid: session.pid,
             ip: config.publicIp,
-            startedAt: session.startedAt.toISOString()
+            startedAt: session.startedAt.toISOString(),
+            mods: session.mods ?? []
           }
         });
         return;
@@ -809,7 +909,7 @@ function createApiServer() {
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
-        const session = await serverManager.startSession(mapName, params, 'test', scripts);
+        const session = await serverManager.startSession(mapName, params, 'test', scripts, mods);
         sendJson(res, 200, {
           ok: true,
           session: {
@@ -818,7 +918,8 @@ function createApiServer() {
             port: session.port,
             pid: session.pid,
             ip: config.publicIp,
-            startedAt: session.startedAt.toISOString()
+            startedAt: session.startedAt.toISOString(),
+            mods: session.mods ?? []
           }
         });
         return;

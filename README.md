@@ -17,7 +17,7 @@ Telegram бот для управления игровым сервером Drea
 | `/dog` | Случайный факт о собаках 🐕 |
 
 ### Доступные карты (/run)
-Список карт настраивается в `.env` через переменную `MAPS`.
+Список карт берётся из `reference/maps.json`.
 
 ---
 
@@ -50,7 +50,6 @@ PUBLIC_IP=185.17.66.195
 BINARY_PATH=C:\Users\Server\WindowsServer\DreadHunger\Binaries\Win64\DreadHungerServer-Win64-Shipping.exe
 PORTS=7777-7782
 MAX_SESSIONS=2
-MAPS=🏔️ Вершина=Departure_Persistent,🌄 Просторы=Expanse_Persistent
 SESSION_PARAMS=daysbeforeblizzard=3?maxplayers=8?thralls=2
 FRIDA_PATH=.\frida\python_loader.bat
 API_TOKEN=change_me
@@ -74,7 +73,6 @@ start-bot.bat
 | `BINARY_PATH` | Путь к `DreadHungerServer-Win64-Shipping.exe` | Абсолютный путь |
 | `PORTS` | Порты (список/диапазоны) | `7777,8000-8010` |
 | `MAX_SESSIONS` | Макс. сессий (0 = без лимита) | `0` |
-| `MAPS` | Карты `Имя=ServerValue` | `Summit=Departure_Persistent` |
 | `SESSION_PARAMS` | Параметры сессии | `maxplayers=8?thralls=2` |
 | `FRIDA_PATH` | Путь к Frida инжектору (опц.) | `.\frida\python_loader.bat` |
 | `API_TOKEN` | Токен API | `change_me` |
