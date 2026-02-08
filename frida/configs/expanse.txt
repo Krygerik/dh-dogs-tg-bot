@@ -6,5 +6,4 @@ patches/quests_2.js
 patches/spirit_walk_on_demand_ver2.js
 patches/add_things_2.js
 patches/charge_one_on_start.js
-patches/cook_upgrade.js
 patches/arrows.js
