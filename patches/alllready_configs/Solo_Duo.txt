@@ -1,2 +1,2 @@
 patches/stable/mana_on_start/mana_on_start.js
-patches/stable/spirit_walk_on_demand/spirit_walk_on_demand.js
+patches/stable/spirit_walk_on_demand_ver2/spirit_walk_on_demand_ver2.js

@@ -1,0 +1,32 @@
+{
+  "presets": [
+    {
+      "id": "solo",
+      "name": "Solo",
+      "values": {
+        "maxplayers": 1,
+        "thralls": 1,
+        "dayminutes": 16,
+        "coldintensity": 0.25,
+        "coalburnrate": 0.1,
+        "daysbeforeblizzard": 7,
+        "predatordamage": 0.25,
+        "hungerrate": 0.25
+      }
+    },
+    {
+      "id": "duo",
+      "name": "Duo",
+      "values": {
+        "maxplayers": 2,
+        "thralls": 2,
+        "dayminutes": 16,
+        "coldintensity": 0.25,
+        "coalburnrate": 0.1,
+        "daysbeforeblizzard": 7,
+        "predatordamage": 0.25,
+        "hungerrate": 0.25
+      }
+    }
+  ]
+}

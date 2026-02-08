@@ -36,6 +36,23 @@ type ModCollection = {
   mods: string[];
 };
 
+type CustomModifierDefinition = {
+  key: string;
+  name: string;
+  min: number;
+  max: number;
+  default: number;
+  step: number;
+  unit?: string;
+  hint?: string;
+};
+
+type CustomModifierPreset = {
+  id: string;
+  name: string;
+  values: Record<string, number>;
+};
+
 type ServerConfig = {
   publicIp: string;
   binaryPath: string;
@@ -57,6 +74,7 @@ type GameSession = {
   startedAt: Date;
   logPath: string;
   mods: string[];
+  customModifiers: Record<string, number>;
 };
 
 type RunningSession = GameSession & {
@@ -74,6 +92,13 @@ const COLLECTIONS_DIR = path.join(process.cwd(), 'patches', 'alllready_configs')
 const MAPS_REF_PATH = path.join(process.cwd(), 'reference', 'maps.json');
 const MAPS_RU_PATH = path.join(process.cwd(), 'reference', 'maps.ru.json');
 const MAPS_COLLECTIONS_PATH = path.join(process.cwd(), 'reference', 'map-collections.json');
+const MODIFIERS_REF_PATH = path.join(process.cwd(), 'reference', 'custom_modifiers.json');
+const MODIFIERS_RU_PATH = path.join(process.cwd(), 'reference', 'custom_modifiers.ru.json');
+const MODIFIERS_PRESETS_PATH = path.join(
+  process.cwd(),
+  'reference',
+  'custom_modifiers.presets.json'
+);
 
 function listStableMods(): ModInfo[] {
   // TODO: consider caching if this becomes a hotspot.
@@ -214,6 +239,124 @@ function loadMapReferences(): MapReference[] {
   } catch {
     return [];
   }
+}
+
+function loadCustomModifiers(): { definitions: CustomModifierDefinition[]; presets: CustomModifierPreset[] } {
+  try {
+    if (!fs.existsSync(MODIFIERS_REF_PATH)) return { definitions: [], presets: [] };
+    const raw = fs.readFileSync(MODIFIERS_REF_PATH, 'utf8');
+    const data = JSON.parse(raw) as { modifiers?: Array<Record<string, unknown>> };
+    const items = Array.isArray(data.modifiers) ? data.modifiers : [];
+    if (items.length === 0) return { definitions: [], presets: [] };
+
+    let localized: Record<string, string> = {};
+    if (fs.existsSync(MODIFIERS_RU_PATH)) {
+      const rawRu = fs.readFileSync(MODIFIERS_RU_PATH, 'utf8');
+      localized = JSON.parse(rawRu) as Record<string, string>;
+    }
+
+    const definitions = items
+      .map((item) => {
+        const key = String(item.key ?? '').trim();
+        const min = Number(item.min);
+        const max = Number(item.max);
+        const def = Number(item.default);
+        const step = Number(item.step ?? 1);
+        const unit = typeof item.unit === 'string' ? item.unit : undefined;
+        const hint = typeof item.hint === 'string' ? item.hint : undefined;
+        if (!key || Number.isNaN(min) || Number.isNaN(max) || Number.isNaN(def)) {
+          return null;
+        }
+        return {
+          key,
+          name: localized[key] ?? key,
+          min,
+          max,
+          default: def,
+          step: Number.isNaN(step) ? 1 : step,
+          unit,
+          hint,
+        } as CustomModifierDefinition;
+      })
+      .filter((item): item is CustomModifierDefinition => Boolean(item));
+
+    let presets: CustomModifierPreset[] = [];
+    if (fs.existsSync(MODIFIERS_PRESETS_PATH)) {
+      const rawPresets = fs.readFileSync(MODIFIERS_PRESETS_PATH, 'utf8');
+      const dataPresets = JSON.parse(rawPresets) as { presets?: Array<Record<string, unknown>> };
+      const rawItems = Array.isArray(dataPresets.presets) ? dataPresets.presets : [];
+      presets = rawItems
+        .map((item) => {
+          const id = String(item.id ?? '').trim();
+          const name = String(item.name ?? '').trim();
+          const values = item.values && typeof item.values === 'object' ? item.values : null;
+          if (!id || !name || !values) return null;
+          const numericValues: Record<string, number> = {};
+          for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+            const num = Number(value);
+            if (!Number.isNaN(num)) numericValues[key] = num;
+          }
+          return { id, name, values: numericValues } as CustomModifierPreset;
+        })
+        .filter((item): item is CustomModifierPreset => Boolean(item));
+    }
+
+    return { definitions, presets };
+  } catch {
+    return { definitions: [], presets: [] };
+  }
+}
+
+function parseCustomModifiers(
+  value: unknown,
+  definitions: CustomModifierDefinition[]
+): { modifiers: Record<string, number>; error?: string } {
+  if (value == null) return { modifiers: {} };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return { modifiers: {}, error: 'customModifiers must be an object' };
+  }
+  const mods: Record<string, number> = {};
+  const defMap = new Map(definitions.map((def) => [def.key, def]));
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const def = defMap.get(key);
+    if (!def) continue;
+    const num = Number(raw);
+    if (Number.isNaN(num)) {
+      return { modifiers: {}, error: `customModifiers.${key} must be a number` };
+    }
+    if (num < def.min || num > def.max) {
+      return { modifiers: {}, error: `customModifiers.${key} out of range` };
+    }
+    if (num !== def.default) {
+      mods[key] = num;
+    }
+  }
+  return { modifiers: mods };
+}
+
+function parseSessionParams(raw: string): Record<string, string> {
+  const params: Record<string, string> = {};
+  for (const part of raw.split('?')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const [key, value] = trimmed.split('=');
+    if (!key || value == null) continue;
+    params[key] = value;
+  }
+  return params;
+}
+
+function buildSessionParams(
+  baseParams: string,
+  customModifiers: Record<string, number>
+): string {
+  const params = parseSessionParams(baseParams);
+  for (const [key, value] of Object.entries(customModifiers)) {
+    params[key] = String(value);
+  }
+  return Object.entries(params)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('?');
 }
 
 function parsePortSpec(raw: string): number[] {
@@ -550,7 +693,8 @@ class ServerManager {
     sessionParamsOverride?: string,
     fridaMode?: string,
     modScripts?: string[],
-    modIds?: string[]
+    modIds?: string[],
+    customModifiers?: Record<string, number>
   ): Promise<GameSession> {
     let map = this.config.maps.find(
       (item) => item.name === mapName || item.serverValue === mapName
@@ -576,7 +720,8 @@ class ServerManager {
       throw new Error('No free ports available');
     }
 
-    const sessionParams = sessionParamsOverride ?? this.config.sessionParams;
+    const baseParams = sessionParamsOverride ?? this.config.sessionParams;
+    const sessionParams = buildSessionParams(baseParams, customModifiers ?? {});
     const mapArg = buildMapArg(map.serverValue, sessionParams, port);
     const child = spawn(this.config.binaryPath, [mapArg, '-log'], {
       cwd: this.config.binaryDir,
@@ -619,6 +764,7 @@ class ServerManager {
       startedAt: new Date(),
       logPath,
       mods: modIds ?? [],
+      customModifiers: customModifiers ?? {},
       process: child,
     };
 
@@ -831,7 +977,8 @@ function createApiServer() {
           pid: session.pid,
           ip: config.publicIp,
           startedAt: session.startedAt.toISOString(),
-          mods: session.mods ?? []
+          mods: session.mods ?? [],
+          customModifiers: session.customModifiers ?? {}
         }));
         sendJson(res, 200, { ok: true, sessions });
         return;
@@ -850,6 +997,12 @@ function createApiServer() {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/modifiers') {
+        const { definitions, presets } = loadCustomModifiers();
+        sendJson(res, 200, { ok: true, modifiers: definitions, presets });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/mods') {
         const mods = listStableMods();
         const collections = listModCollections(mods);
@@ -861,8 +1014,17 @@ function createApiServer() {
         const body = await readJsonBody(req);
         const mapName = body.mapName;
         const { mods, error } = parseMods(body.mods);
+        const { definitions: modifierDefs } = loadCustomModifiers();
+        const { modifiers, error: modifiersError } = parseCustomModifiers(
+          body.customModifiers,
+          modifierDefs
+        );
         if (error) {
           sendJson(res, 400, { ok: false, error });
+          return;
+        }
+        if (modifiersError) {
+          sendJson(res, 400, { ok: false, error: modifiersError });
           return;
         }
         if (typeof mapName !== 'string' || mapName.length === 0) {
@@ -874,7 +1036,14 @@ function createApiServer() {
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
-        const session = await serverManager.startSession(mapName, undefined, undefined, scripts, mods);
+        const session = await serverManager.startSession(
+          mapName,
+          undefined,
+          undefined,
+          scripts,
+          mods,
+          modifiers
+        );
         sendJson(res, 200, {
           ok: true,
           session: {
@@ -884,7 +1053,8 @@ function createApiServer() {
             pid: session.pid,
             ip: config.publicIp,
             startedAt: session.startedAt.toISOString(),
-            mods: session.mods ?? []
+            mods: session.mods ?? [],
+            customModifiers: session.customModifiers ?? {}
           }
         });
         return;
@@ -895,8 +1065,17 @@ function createApiServer() {
         const mapName = body.mapName;
         const mode = typeof body.mode === 'string' ? body.mode : 'solo';
         const { mods, error } = parseMods(body.mods);
+        const { definitions: modifierDefs } = loadCustomModifiers();
+        const { modifiers, error: modifiersError } = parseCustomModifiers(
+          body.customModifiers,
+          modifierDefs
+        );
         if (error) {
           sendJson(res, 400, { ok: false, error });
+          return;
+        }
+        if (modifiersError) {
+          sendJson(res, 400, { ok: false, error: modifiersError });
           return;
         }
         if (typeof mapName !== 'string' || mapName.length === 0) {
@@ -909,7 +1088,14 @@ function createApiServer() {
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
-        const session = await serverManager.startSession(mapName, params, 'test', scripts, mods);
+        const session = await serverManager.startSession(
+          mapName,
+          params,
+          'test',
+          scripts,
+          mods,
+          modifiers
+        );
         sendJson(res, 200, {
           ok: true,
           session: {
@@ -919,7 +1105,8 @@ function createApiServer() {
             pid: session.pid,
             ip: config.publicIp,
             startedAt: session.startedAt.toISOString(),
-            mods: session.mods ?? []
+            mods: session.mods ?? [],
+            customModifiers: session.customModifiers ?? {}
           }
         });
         return;

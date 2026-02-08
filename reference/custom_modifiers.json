@@ -1,0 +1,12 @@
+{
+  "modifiers": [
+    { "key": "maxplayers", "min": 1, "max": 8, "default": 8, "step": 1, "unit": "игроков", "hint": "Максимум игроков в сессии." },
+    { "key": "daysbeforeblizzard", "min": 2, "max": 7, "default": 3, "step": 1, "unit": "дней", "hint": "Сколько дней до начала метели." },
+    { "key": "dayminutes", "min": 5, "max": 16, "default": 9, "step": 1, "unit": "мин", "hint": "Длительность одного дня в минутах." },
+    { "key": "predatordamage", "min": 0.25, "max": 3, "default": 1, "step": 0.25, "unit": "x", "hint": "Множитель урона хищников." },
+    { "key": "coldintensity", "min": 0.25, "max": 3, "default": 1, "step": 0.25, "unit": "x", "hint": "Множитель интенсивности холода." },
+    { "key": "hungerrate", "min": 0.25, "max": 3, "default": 1, "step": 0.25, "unit": "x", "hint": "Множитель скорости голода." },
+    { "key": "coalburnrate", "min": 0.1, "max": 2, "default": 1, "step": 0.1, "unit": "x", "hint": "Множитель скорости сгорания угля." },
+    { "key": "thralls", "min": 0, "max": 8, "default": 2, "step": 1, "unit": "предателей", "hint": "Количество предателей." }
+  ]
+}
