@@ -98,8 +98,9 @@ start-bot.bat
 Эндпоинты:
 - `GET /status` — активные сессии
 - `GET /maps` — список карт
-- `POST /run` — запуск сессии `{ "mapName": "..." }`
-- `POST /testing` — тестовый запуск `{ "mapName": "...", "mode": "solo|duo" }`
+- `GET /mods` — список доступных модов
+- `POST /run` — запуск сессии `{ "mapName": "...", "mods": ["..."] }`
+- `POST /testing` — тестовый запуск `{ "mapName": "...", "mode": "solo|duo", "mods": ["..."] }`
 - `POST /stop` — остановка сессии `{ "port": 7777 }`
 
 Если задан `API_TOKEN`, нужно отправлять заголовок `X-API-Token`.
@@ -188,6 +189,9 @@ npm run build
 ```bash
 # Режим разработки
 npm run dev
+
+# Режим разработки с hot reload
+npm run dev:watch
 
 # Сборка
 npm run build

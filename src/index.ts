@@ -17,6 +17,13 @@ type MapConfig = {
   serverValue: string;
 };
 
+type ModInfo = {
+  id: string;
+  name: string;
+  scriptPath: string;
+  description: string;
+};
+
 type ServerConfig = {
   publicIp: string;
   binaryPath: string;
@@ -49,6 +56,74 @@ const API_PORT = 8787;
 const API_TOKEN = (process.env.API_TOKEN ?? '').trim();
 const TEST_PARAMS_SOLO = 'maxplayers=1?thralls=1';
 const TEST_PARAMS_DUO = 'maxplayers=2?thralls=2';
+const STABLE_DIR = path.join(process.cwd(), 'patches', 'stable');
+
+function listStableMods(): ModInfo[] {
+  // TODO: consider caching if this becomes a hotspot.
+  if (!fs.existsSync(STABLE_DIR)) {
+    return [];
+  }
+  const entries = fs.readdirSync(STABLE_DIR, { withFileTypes: true });
+  const mods: ModInfo[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = entry.name;
+    const scriptFile = `${name}.js`;
+    const descriptionFile = `${name}.txt`;
+    const scriptFullPath = path.join(STABLE_DIR, name, scriptFile);
+    if (!fs.existsSync(scriptFullPath)) {
+      continue;
+    }
+    const descriptionPath = path.join(STABLE_DIR, name, descriptionFile);
+    let description = '';
+    if (fs.existsSync(descriptionPath)) {
+      description = fs.readFileSync(descriptionPath, 'utf8').trim();
+    }
+    const scriptPath = path.posix.join('patches', 'stable', name, scriptFile);
+    mods.push({
+      id: name,
+      name,
+      scriptPath,
+      description,
+    });
+  }
+  mods.sort((a, b) => a.name.localeCompare(b.name));
+  return mods;
+}
+
+function resolveModScripts(modIds: string[]): { scripts: string[]; unknown: string[] } {
+  const catalog = listStableMods();
+  const map = new Map(catalog.map((mod) => [mod.id, mod]));
+  const scripts: string[] = [];
+  const unknown: string[] = [];
+  for (const id of modIds) {
+    const mod = map.get(id);
+    if (!mod) {
+      unknown.push(id);
+      continue;
+    }
+    scripts.push(mod.scriptPath);
+  }
+  return { scripts, unknown };
+}
+
+function parseMods(value: unknown): { mods: string[]; error?: string } {
+  if (value == null) {
+    return { mods: [] };
+  }
+  if (!Array.isArray(value)) {
+    return { mods: [], error: 'mods must be an array of strings' };
+  }
+  const mods: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      return { mods: [], error: 'mods must be an array of strings' };
+    }
+    const trimmed = item.trim();
+    if (trimmed) mods.push(trimmed);
+  }
+  return { mods };
+}
 
 function parsePortSpec(raw: string): number[] {
   const ports = new Set<number>();
@@ -396,7 +471,8 @@ class ServerManager {
   async startSession(
     mapName: string,
     sessionParamsOverride?: string,
-    fridaMode?: string
+    fridaMode?: string,
+    modScripts?: string[]
   ): Promise<GameSession> {
     const map = this.config.maps.find((item) => item.name === mapName);
     if (!map) {
@@ -444,7 +520,7 @@ class ServerManager {
     await Promise.race([initPromise, exitPromise]);
 
     if (this.config.fridaPath) {
-      await this.runFrida(child.pid, map.serverValue, fridaMode, logPath);
+      await this.runFrida(child.pid, map.serverValue, fridaMode, logPath, modScripts);
     }
 
     const session: RunningSession = {
@@ -494,11 +570,17 @@ class ServerManager {
     pid: number,
     mapValue: string,
     fridaMode?: string,
-    logPath?: string
+    logPath?: string,
+    modScripts?: string[]
   ): Promise<void> {
     const resolvedFridaPath = resolveFridaPath(this.config.fridaPath);
     const fridaArgs = [pid, mapValue];
     if (fridaMode) fridaArgs.push(fridaMode);
+    if (modScripts && modScripts.length > 0) {
+      for (const script of modScripts) {
+        fridaArgs.push('--mod', script);
+      }
+    }
     const { command, args } = wrapCommand(resolvedFridaPath, fridaArgs);
     const frida = spawn(command, args, {
       windowsHide: true,
@@ -670,14 +752,30 @@ function createApiServer() {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/mods') {
+        const mods = listStableMods();
+        sendJson(res, 200, { ok: true, mods });
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/run') {
         const body = await readJsonBody(req);
         const mapName = body.mapName;
+        const { mods, error } = parseMods(body.mods);
+        if (error) {
+          sendJson(res, 400, { ok: false, error });
+          return;
+        }
         if (typeof mapName !== 'string' || mapName.length === 0) {
           sendJson(res, 400, { ok: false, error: 'mapName is required' });
           return;
         }
-        const session = await serverManager.startSession(mapName);
+        const { scripts, unknown } = resolveModScripts(mods);
+        if (unknown.length > 0) {
+          sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
+          return;
+        }
+        const session = await serverManager.startSession(mapName, undefined, undefined, scripts);
         sendJson(res, 200, {
           ok: true,
           session: {
@@ -696,12 +794,22 @@ function createApiServer() {
         const body = await readJsonBody(req);
         const mapName = body.mapName;
         const mode = typeof body.mode === 'string' ? body.mode : 'solo';
+        const { mods, error } = parseMods(body.mods);
+        if (error) {
+          sendJson(res, 400, { ok: false, error });
+          return;
+        }
         if (typeof mapName !== 'string' || mapName.length === 0) {
           sendJson(res, 400, { ok: false, error: 'mapName is required' });
           return;
         }
         const params = mode === 'duo' ? TEST_PARAMS_DUO : TEST_PARAMS_SOLO;
-        const session = await serverManager.startSession(mapName, params, 'test');
+        const { scripts, unknown } = resolveModScripts(mods);
+        if (unknown.length > 0) {
+          sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
+          return;
+        }
+        const session = await serverManager.startSession(mapName, params, 'test', scripts);
         sendJson(res, 200, {
           ok: true,
           session: {

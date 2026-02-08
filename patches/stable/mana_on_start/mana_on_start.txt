@@ -1,0 +1,1 @@
+Adds mana and reduces spell cooldowns after casting.

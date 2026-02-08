@@ -3,6 +3,7 @@ import sys
 import time
 import psutil
 import frida
+import json
 
 
 SCRIPT_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -47,7 +48,23 @@ def dedupe_scripts(scripts):
     return ordered
 
 
-def load_scripts_config(map_value):
+def load_scripts_config(map_value, mods_json=None, mods_list=None):
+    if mods_list is not None:
+        scripts = [item.strip() for item in mods_list if isinstance(item, str) and item.strip()]
+        return dedupe_scripts(scripts)
+
+    if mods_json is not None:
+        if not mods_json.strip():
+            return []
+        try:
+            data = json.loads(mods_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid mods JSON: {exc}") from exc
+        if not isinstance(data, list):
+            raise ValueError("mods JSON must be a list")
+        scripts = [item.strip() for item in data if isinstance(item, str) and item.strip()]
+        return dedupe_scripts(scripts)
+
     lowered = map_value.lower()
     base_config = MAP_CONFIGS.get(map_value)
     if not base_config:
@@ -99,20 +116,42 @@ def close_terminal():
 
 def parse_pid_from_args(argv):
     """
-    Expect exactly one argument (the PID).
+    Usage: <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...]
     """
     print("argv: ", argv)
-    if len(argv) not in (3, 4):
-        raise ValueError(f"Usage: {argv[0]} <PID> <MapValue> [Mode]")
+    if len(argv) < 3:
+        raise ValueError(f"Usage: {argv[0]} <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...]")
     pid_str = argv[1]
     map_str = argv[2]
-    mode = argv[3].lower() if len(argv) == 4 else ""
+    mode = ""
+    mods_json = None
+    mods_list = []
+    idx = 3
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--mods-json":
+            if idx + 1 >= len(argv):
+                raise ValueError("Missing value for --mods-json")
+            mods_json = argv[idx + 1]
+            idx += 2
+            continue
+        if token == "--mod":
+            if idx + 1 >= len(argv):
+                raise ValueError("Missing value for --mod")
+            mods_list.append(argv[idx + 1])
+            idx += 2
+            continue
+        if not mode:
+            mode = token.lower()
+            idx += 1
+            continue
+        raise ValueError(f"Unknown argument: {token}")
     if not pid_str.isdigit():
         raise ValueError(f"Invalid PID: {pid_str!r} (must be a positive integer)")
     pid = int(pid_str)
     if pid <= 0:
         raise ValueError(f"Invalid PID: {pid!r} (must be > 0)")
-    return pid, map_str, mode
+    return pid, map_str, mode, mods_json, mods_list
 
 # Main logic
 
@@ -120,19 +159,22 @@ def parse_pid_from_args(argv):
 if __name__ == "__main__":
     try:
         
-        pid, map_str, mode = parse_pid_from_args(sys.argv)
+        pid, map_str, mode, mods_json, mods_list = parse_pid_from_args(sys.argv)
         print(f"PID: {pid}. Attaching Frida...")
 
         # Attach to the process using Frida
         session = frida.attach(pid)
-        scripts = load_scripts_config(map_str)
-        if mode == "test":
+        scripts = load_scripts_config(map_str, mods_json, mods_list if mods_list else None)
+        if mods_json is None and not mods_list and mode == "test":
             scripts += read_config("Solo_Duo.txt")
             scripts = dedupe_scripts(scripts)
             
         print("Final scripts to inject:")
-        for script in scripts:
-            print(f"  - {script}")
+        if scripts:
+            for script in scripts:
+                print(f"  - {script}")
+        else:
+            print("  (no scripts)")
 
         attach_to_process_and_inject_scripts(session, scripts)
         
