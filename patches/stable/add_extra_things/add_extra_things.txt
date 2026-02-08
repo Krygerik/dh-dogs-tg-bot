@@ -1,0 +1,1 @@
+Adds icebergs and modifies the Expanse map. Expands the Lighthouse with a workbench, also add extra skeletons, coal, yellow buckets and doctor's packs.

@@ -1,0 +1,1 @@
+All Thrall spells now heal, except Spirit Walk.

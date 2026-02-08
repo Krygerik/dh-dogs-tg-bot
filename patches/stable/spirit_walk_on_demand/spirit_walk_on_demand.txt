@@ -1,0 +1,1 @@
+Allows exiting Spirit Walk using V (Thrall Vision).

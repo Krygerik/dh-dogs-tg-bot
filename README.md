@@ -53,8 +53,6 @@ MAX_SESSIONS=2
 MAPS=🏔️ Вершина=Departure_Persistent,🌄 Просторы=Expanse_Persistent
 SESSION_PARAMS=daysbeforeblizzard=3?maxplayers=8?thralls=2
 FRIDA_PATH=.\frida\python_loader.bat
-STEAM_APP_ID=1418630
-APP_ENV=dev
 API_TOKEN=change_me
 ```
 
@@ -79,8 +77,6 @@ start-bot.bat
 | `MAPS` | Карты `Имя=ServerValue` | `Summit=Departure_Persistent` |
 | `SESSION_PARAMS` | Параметры сессии | `maxplayers=8?thralls=2` |
 | `FRIDA_PATH` | Путь к Frida инжектору (опц.) | `.\frida\python_loader.bat` |
-| `STEAM_APP_ID` | Steam AppID для ссылок подключения | `1418630` |
-| `APP_ENV` | Режим окружения | `dev` или `prod` |
 | `API_TOKEN` | Токен API | `change_me` |
 
 ---

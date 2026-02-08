@@ -1,0 +1,1 @@
+Thralls now have 5 spells instead of 3.

@@ -6,12 +6,13 @@ import frida
 
 
 SCRIPT_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
+CONFIG_DIR = os.path.join(SCRIPT_BASE_DIR, "patches", "alllready_configs")
 
 
 MAP_CONFIGS = {
-    "Expanse_Persistent": "expanse.txt",
-    "Departure_Persistent": "departure.txt",
+    "Expanse_Persistent": "Expanse.txt",
+    "Departure_Persistent": "Departure.txt",
+    "Approach_Persistent": "Approach.txt",
 }
 
 
@@ -59,7 +60,7 @@ def load_scripts_config(map_value):
 
     scripts = read_config(base_config)
     if "solo" in lowered or "duo" in lowered:
-        scripts += read_config("solo_or_duo.txt")
+        scripts += read_config("Solo_Duo.txt")
 
     return dedupe_scripts(scripts)
 
@@ -126,7 +127,7 @@ if __name__ == "__main__":
         session = frida.attach(pid)
         scripts = load_scripts_config(map_str)
         if mode == "test":
-            scripts += read_config("solo_or_duo.txt")
+            scripts += read_config("Solo_Duo.txt")
             scripts = dedupe_scripts(scripts)
             
         print("Final scripts to inject:")

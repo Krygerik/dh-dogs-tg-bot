@@ -1,0 +1,1 @@
+Casts Hash at game start.

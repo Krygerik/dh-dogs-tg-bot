@@ -1,2 +1,0 @@
-patches/mana_on_start.js
-patches/spirit_walk_on_demand_ver2.js
