@@ -76,6 +76,8 @@ start-bot.bat
 | `SESSION_PARAMS` | Параметры сессии | `maxplayers=8?thralls=2` |
 | `FRIDA_PATH` | Путь к Frida инжектору (опц.) | `.\frida\python_loader.bat` |
 | `API_TOKEN` | Токен API | `change_me` |
+| `TELEMETRY_ENABLE` | Включить Frida‑телеметрию | `true` |
+| `TELEMETRY_BASE_PORT` | Базовый порт для telemetry bridge | `8790` |
 
 ---
 

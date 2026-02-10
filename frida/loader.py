@@ -4,6 +4,9 @@ import time
 import psutil
 import frida
 import json
+import threading
+from http.server import BaseHTTPRequestHandler
+from socketserver import ThreadingTCPServer
 
 
 SCRIPT_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -21,7 +24,104 @@ def resolve_script_path(script_path):
     return os.path.abspath(os.path.join(SCRIPT_BASE_DIR, script_path))
 
 
+class TelemetryBridge:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.latest_state = None
+        self.last_update_ts = 0
+        self.script = None
+        self.lock = threading.Lock()
+
+    def set_script(self, script):
+        self.script = script
+
+    def update_state(self, payload):
+        with self.lock:
+            self.latest_state = payload
+            self.last_update_ts = time.time()
+
+    def get_state(self):
+        with self.lock:
+            return self.latest_state, self.last_update_ts
+
+    def send_command(self, payload):
+        if not self.script:
+            return False, "Telemetry script not loaded"
+        try:
+            self.script.post({"type": "command", "payload": payload})
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
+    def make_handler(self):
+        bridge = self
+
+        class TelemetryHandler(BaseHTTPRequestHandler):
+            def _send_json(self, status, payload):
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/health":
+                    self._send_json(200, {"ok": True})
+                    return
+                if self.path == "/state":
+                    state, updated_at = bridge.get_state()
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "updatedAt": updated_at,
+                            "state": state,
+                        },
+                    )
+                    return
+                self._send_json(404, {"ok": False, "error": "Not found"})
+
+            def do_POST(self):
+                if self.path != "/command":
+                    self._send_json(404, {"ok": False, "error": "Not found"})
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length > 0 else b""
+                if not raw:
+                    self._send_json(400, {"ok": False, "error": "Empty body"})
+                    return
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except json.JSONDecodeError:
+                    self._send_json(400, {"ok": False, "error": "Invalid JSON"})
+                    return
+                ok, error = bridge.send_command(payload)
+                if ok:
+                    self._send_json(200, {"ok": True})
+                else:
+                    self._send_json(500, {"ok": False, "error": error})
+
+            def log_message(self, format, *args):
+                return
+
+        return TelemetryHandler
+
+
+telemetry_bridge = None
+
+
 def on_message(msg, data):
+    if msg.get("type") == "send":
+        payload = msg.get("payload")
+        if isinstance(payload, dict) and payload.get("type") == "telemetry":
+            if telemetry_bridge:
+                telemetry_bridge.update_state(payload.get("data"))
+            return
+    if msg.get("type") == "error":
+        print("[frida:error]", msg)
+        return
     print(msg)
 
 
@@ -84,6 +184,7 @@ def load_scripts_config(map_value, mods_json=None, mods_list=None):
 
 # Function to attach to the process and inject scripts
 def attach_to_process_and_inject_scripts(session, scripts):
+    loaded = []
     for script_path in scripts:
         resolved_path = resolve_script_path(script_path)
         if not os.path.exists(resolved_path):
@@ -91,7 +192,10 @@ def attach_to_process_and_inject_scripts(session, scripts):
             continue
         with open(resolved_path, 'r', encoding="utf-8") as file:
             script_code = file.read()
-            inject_script(session, script_code)
+            script = inject_script(session, script_code)
+            if script:
+                loaded.append((script_path, script))
+    return loaded
 
 # Function to inject each script
 def inject_script(session, script_code):
@@ -100,8 +204,10 @@ def inject_script(session, script_code):
         script.on("message", on_message)
         script.load()  # Load and execute the script
         print("Successfully injected script.")
+        return script
     except Exception as e:
         print(f"Error injecting script: {e}")
+    return None
 
 # Function to check if the process is still running by its PID
 def is_process_running(pid):
@@ -116,16 +222,20 @@ def close_terminal():
 
 def parse_pid_from_args(argv):
     """
-    Usage: <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...]
+    Usage: <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>]
     """
     print("argv: ", argv)
     if len(argv) < 3:
-        raise ValueError(f"Usage: {argv[0]} <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...]")
+        raise ValueError(
+            f"Usage: {argv[0]} <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>]"
+        )
     pid_str = argv[1]
     map_str = argv[2]
     mode = ""
     mods_json = None
     mods_list = []
+    telemetry_port = None
+    session_port = None
     idx = 3
     while idx < len(argv):
         token = argv[idx]
@@ -141,6 +251,18 @@ def parse_pid_from_args(argv):
             mods_list.append(argv[idx + 1])
             idx += 2
             continue
+        if token == "--telemetry-port":
+            if idx + 1 >= len(argv):
+                raise ValueError("Missing value for --telemetry-port")
+            telemetry_port = int(argv[idx + 1])
+            idx += 2
+            continue
+        if token == "--session-port":
+            if idx + 1 >= len(argv):
+                raise ValueError("Missing value for --session-port")
+            session_port = int(argv[idx + 1])
+            idx += 2
+            continue
         if not mode:
             mode = token.lower()
             idx += 1
@@ -151,15 +273,14 @@ def parse_pid_from_args(argv):
     pid = int(pid_str)
     if pid <= 0:
         raise ValueError(f"Invalid PID: {pid!r} (must be > 0)")
-    return pid, map_str, mode, mods_json, mods_list
+    return pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port
 
 # Main logic
 
 
 if __name__ == "__main__":
     try:
-        
-        pid, map_str, mode, mods_json, mods_list = parse_pid_from_args(sys.argv)
+        pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port = parse_pid_from_args(sys.argv)
         print(f"PID: {pid}. Attaching Frida...")
 
         # Attach to the process using Frida
@@ -176,7 +297,41 @@ if __name__ == "__main__":
         else:
             print("  (no scripts)")
 
-        attach_to_process_and_inject_scripts(session, scripts)
+        loaded_scripts = attach_to_process_and_inject_scripts(session, scripts)
+
+        telemetry_script = None
+        for script_path, script in loaded_scripts:
+            normalized = script_path.replace("\\", "/")
+            if normalized.endswith("/telemetry/telemetry.js"):
+                telemetry_script = script
+                break
+
+        server = None
+        if telemetry_port:
+            telemetry_bridge = TelemetryBridge("127.0.0.1", telemetry_port)
+            if telemetry_script:
+                telemetry_bridge.set_script(telemetry_script)
+                try:
+                    telemetry_script.post(
+                        {
+                            "type": "config",
+                            "payload": {
+                                "sessionPort": session_port or 0,
+                                "telemetryPort": telemetry_port,
+                            },
+                        }
+                    )
+                except Exception as exc:
+                    print(f"Failed to send telemetry config: {exc}")
+            else:
+                print("Telemetry port provided but telemetry script not loaded.")
+
+            handler = telemetry_bridge.make_handler()
+            server = ThreadingTCPServer((telemetry_bridge.host, telemetry_bridge.port), handler)
+            server.daemon_threads = True
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            print(f"Telemetry HTTP server: http://{telemetry_bridge.host}:{telemetry_bridge.port}")
         
         # Frida finished
         print("Frida scripts have been injected.")
@@ -189,6 +344,11 @@ if __name__ == "__main__":
         # Detach from Frida when the process stops running
         print(f"Process with PID {pid} has stopped. Detaching from Frida session.")
         session.detach()
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"Error: {str(e)}")

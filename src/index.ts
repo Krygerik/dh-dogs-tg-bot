@@ -65,6 +65,8 @@ type ServerConfig = {
   initTimeoutMs: number;
   fridaPath: string;
   fridaInitSignature: string;
+  telemetryEnabled: boolean;
+  telemetryBasePort: number;
 };
 
 type GameSession = {
@@ -75,6 +77,7 @@ type GameSession = {
   logPath: string;
   mods: string[];
   customModifiers: Record<string, number>;
+  telemetryPort?: number;
 };
 
 type RunningSession = GameSession & {
@@ -94,11 +97,18 @@ const MAPS_RU_PATH = path.join(process.cwd(), 'reference', 'maps.ru.json');
 const MAPS_COLLECTIONS_PATH = path.join(process.cwd(), 'reference', 'map-collections.json');
 const MODIFIERS_REF_PATH = path.join(process.cwd(), 'reference', 'custom_modifiers.json');
 const MODIFIERS_RU_PATH = path.join(process.cwd(), 'reference', 'custom_modifiers.ru.json');
+const ROLES_REF_PATH = path.join(process.cwd(), 'reference', 'roles.json');
+const ITEMS_REF_PATH = path.join(process.cwd(), 'reference', 'items.json');
 const MODIFIERS_PRESETS_PATH = path.join(
   process.cwd(),
   'reference',
   'custom_modifiers.presets.json'
 );
+
+function isTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
 
 function listStableMods(): ModInfo[] {
   // TODO: consider caching if this becomes a hotspot.
@@ -307,6 +317,43 @@ function loadCustomModifiers(): { definitions: CustomModifierDefinition[]; prese
   }
 }
 
+function loadRoleReferences(): Array<{ id: string; name: string; assetPath?: string; roleType?: number }> {
+  if (!fs.existsSync(ROLES_REF_PATH)) return [];
+  try {
+    const raw = fs.readFileSync(ROLES_REF_PATH, 'utf8');
+    const data = JSON.parse(raw) as { roles?: Array<Record<string, unknown>> };
+    const items = Array.isArray(data.roles) ? data.roles : [];
+    return items
+      .map((item) => ({
+        id: String(item.id ?? ''),
+        name: String(item.name ?? ''),
+        assetPath: item.assetPath ? String(item.assetPath) : '',
+        roleType: Number.isFinite(Number(item.roleType)) ? Number(item.roleType) : undefined,
+      }))
+      .filter((item) => item.id && item.name);
+  } catch {
+    return [];
+  }
+}
+
+function loadItemReferences(): Array<{ typeId: number; name: string; itemPath?: string }> {
+  if (!fs.existsSync(ITEMS_REF_PATH)) return [];
+  try {
+    const raw = fs.readFileSync(ITEMS_REF_PATH, 'utf8');
+    const data = JSON.parse(raw) as { items?: Array<Record<string, unknown>> };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return items
+      .map((item) => ({
+        typeId: Number(item.typeId ?? -1),
+        name: String(item.name ?? ''),
+        itemPath: item.itemPath ? String(item.itemPath) : '',
+      }))
+      .filter((item) => Number.isFinite(item.typeId) && item.typeId >= 0 && item.name);
+  } catch {
+    return [];
+  }
+}
+
 function parseCustomModifiers(
   value: unknown,
   definitions: CustomModifierDefinition[]
@@ -428,6 +475,59 @@ function sendJson(res: http.ServerResponse, statusCode: number, payload: unknown
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(payload));
+}
+
+function requestLocalJson(
+  port: number,
+  path: string,
+  method: 'GET' | 'POST',
+  body?: unknown
+): Promise<{ status: number; payload: unknown }> {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : '';
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method,
+        headers: payload
+          ? {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(payload),
+            }
+          : undefined,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          if (!data) {
+            resolve({ status: res.statusCode ?? 200, payload: {} });
+            return;
+          }
+          try {
+            resolve({
+              status: res.statusCode ?? 200,
+              payload: JSON.parse(data),
+            });
+          } catch (error) {
+            resolve({
+              status: res.statusCode ?? 500,
+              payload: { ok: false, error: 'Invalid JSON from telemetry bridge' },
+            });
+          }
+        });
+      }
+    );
+    req.on('error', (error) => reject(error));
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -753,8 +853,26 @@ class ServerManager {
 
     await Promise.race([initPromise, exitPromise]);
 
+    const fridaScripts = [...(modScripts ?? [])];
+    let telemetryPort: number | undefined;
+    if (this.config.telemetryEnabled) {
+      const telemetryScript = 'patches/technical/telemetry/telemetry.js';
+      if (!fridaScripts.includes(telemetryScript)) {
+        fridaScripts.push(telemetryScript);
+      }
+      telemetryPort = this.config.telemetryBasePort + port;
+    }
+
     if (this.config.fridaPath) {
-      await this.runFrida(child.pid, map.serverValue, fridaMode, logPath, modScripts);
+      await this.runFrida(
+        child.pid,
+        map.serverValue,
+        fridaMode,
+        logPath,
+        fridaScripts,
+        telemetryPort,
+        port
+      );
     }
 
     const session: RunningSession = {
@@ -765,6 +883,7 @@ class ServerManager {
       logPath,
       mods: modIds ?? [],
       customModifiers: customModifiers ?? {},
+      telemetryPort,
       process: child,
     };
 
@@ -807,7 +926,9 @@ class ServerManager {
     mapValue: string,
     fridaMode?: string,
     logPath?: string,
-    modScripts?: string[]
+    modScripts?: string[],
+    telemetryPort?: number,
+    sessionPort?: number
   ): Promise<void> {
     const resolvedFridaPath = resolveFridaPath(this.config.fridaPath);
     const fridaArgs = [pid, mapValue];
@@ -816,6 +937,12 @@ class ServerManager {
       for (const script of modScripts) {
         fridaArgs.push('--mod', script);
       }
+    }
+    if (typeof telemetryPort === 'number') {
+      fridaArgs.push('--telemetry-port', telemetryPort);
+    }
+    if (typeof sessionPort === 'number') {
+      fridaArgs.push('--session-port', sessionPort);
     }
     const { command, args } = wrapCommand(resolvedFridaPath, fridaArgs);
     const frida = spawn(command, args, {
@@ -917,6 +1044,11 @@ function buildConfig(): ServerConfig {
     throw new Error('Map references are empty. Check reference/maps.json');
   }
 
+  const telemetryBasePortRaw = Number.parseInt(process.env.TELEMETRY_BASE_PORT ?? '8790', 10);
+  const telemetryBasePort = Number.isNaN(telemetryBasePortRaw)
+    ? 8790
+    : telemetryBasePortRaw;
+
   return {
     publicIp,
     binaryPath: resolvedBinaryPath,
@@ -929,6 +1061,8 @@ function buildConfig(): ServerConfig {
     initTimeoutMs: 30000,
     fridaPath: process.env.FRIDA_PATH ?? '',
     fridaInitSignature: 'Frida scripts have been injected.',
+    telemetryEnabled: isTruthy(process.env.TELEMETRY_ENABLE),
+    telemetryBasePort,
   };
 }
 
@@ -977,10 +1111,86 @@ function createApiServer() {
           pid: session.pid,
           ip: config.publicIp,
           startedAt: session.startedAt.toISOString(),
+          telemetryPort: session.telemetryPort ?? null,
           mods: session.mods ?? [],
           customModifiers: session.customModifiers ?? {}
         }));
         sendJson(res, 200, { ok: true, sessions });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/session') {
+        const portStr = url.searchParams.get('port') ?? '';
+        const port = Number.parseInt(portStr, 10);
+        if (Number.isNaN(port)) {
+          sendJson(res, 400, { ok: false, error: 'port is required' });
+          return;
+        }
+        const session = serverManager.listSessions().find((item) => item.port === port);
+        if (!session) {
+          sendJson(res, 404, { ok: false, error: 'Session not found' });
+          return;
+        }
+        sendJson(res, 200, {
+          ok: true,
+          session: {
+            mapName: session.map.name,
+            mapValue: session.map.serverValue,
+            port: session.port,
+            pid: session.pid,
+            ip: config.publicIp,
+            startedAt: session.startedAt.toISOString(),
+            telemetryPort: session.telemetryPort ?? null,
+          },
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/telemetry') {
+        const portStr = url.searchParams.get('port') ?? '';
+        const port = Number.parseInt(portStr, 10);
+        if (Number.isNaN(port)) {
+          sendJson(res, 400, { ok: false, error: 'port is required' });
+          return;
+        }
+        const session = serverManager.listSessions().find((item) => item.port === port);
+        if (!session || !session.telemetryPort) {
+          sendJson(res, 404, { ok: false, error: 'Telemetry not available' });
+          return;
+        }
+        try {
+          const response = await requestLocalJson(session.telemetryPort, '/state', 'GET');
+          sendJson(res, response.status, response.payload);
+        } catch (error) {
+          sendJson(res, 502, { ok: false, error: (error as Error).message });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/telemetry/command') {
+        const body = await readJsonBody(req);
+        const port = Number.parseInt(String(body.port ?? ''), 10);
+        if (Number.isNaN(port)) {
+          sendJson(res, 400, { ok: false, error: 'port is required' });
+          return;
+        }
+        const session = serverManager.listSessions().find((item) => item.port === port);
+        if (!session || !session.telemetryPort) {
+          sendJson(res, 404, { ok: false, error: 'Telemetry not available' });
+          return;
+        }
+        const command = typeof body.command === 'object' && body.command ? body.command : body;
+        try {
+          const response = await requestLocalJson(
+            session.telemetryPort,
+            '/command',
+            'POST',
+            command
+          );
+          sendJson(res, response.status, response.payload);
+        } catch (error) {
+          sendJson(res, 502, { ok: false, error: (error as Error).message });
+        }
         return;
       }
 
@@ -1000,6 +1210,18 @@ function createApiServer() {
       if (req.method === 'GET' && url.pathname === '/modifiers') {
         const { definitions, presets } = loadCustomModifiers();
         sendJson(res, 200, { ok: true, modifiers: definitions, presets });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/reference/roles') {
+        const roles = loadRoleReferences();
+        sendJson(res, 200, { ok: true, roles });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/reference/items') {
+        const items = loadItemReferences();
+        sendJson(res, 200, { ok: true, items });
         return;
       }
 
@@ -1053,6 +1275,7 @@ function createApiServer() {
             pid: session.pid,
             ip: config.publicIp,
             startedAt: session.startedAt.toISOString(),
+            telemetryPort: session.telemetryPort ?? null,
             mods: session.mods ?? [],
             customModifiers: session.customModifiers ?? {}
           }
@@ -1105,6 +1328,7 @@ function createApiServer() {
             pid: session.pid,
             ip: config.publicIp,
             startedAt: session.startedAt.toISOString(),
+            telemetryPort: session.telemetryPort ?? null,
             mods: session.mods ?? [],
             customModifiers: session.customModifiers ?? {}
           }

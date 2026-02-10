@@ -1,0 +1,1 @@
+Telemetry bridge: состояние мира и игроков + control команды.

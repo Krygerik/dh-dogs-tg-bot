@@ -1,0 +1,12 @@
+{
+  "roles": [
+    { "id": "engineer", "name": "Инженер", "roleType": 1, "assetPath": "" },
+    { "id": "royal_marine", "name": "Королевский морпех", "roleType": 2, "assetPath": "" },
+    { "id": "captain", "name": "Капитан", "roleType": 3, "assetPath": "" },
+    { "id": "cook", "name": "Повар", "roleType": 4, "assetPath": "" },
+    { "id": "chaplain", "name": "Капелан", "roleType": 5, "assetPath": "" },
+    { "id": "navigator", "name": "Навигатор", "roleType": 6, "assetPath": "" },
+    { "id": "doctor", "name": "Доктор", "roleType": 7, "assetPath": "" },
+    { "id": "hunter", "name": "Охотница", "roleType": 8, "assetPath": "" }
+  ]
+}
