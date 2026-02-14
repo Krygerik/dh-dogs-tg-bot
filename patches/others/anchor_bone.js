@@ -1,5 +1,5 @@
 // Find the base address of the game module
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 // ADH_HumanCharacter::EndSpiritWalk(this)
 var ADH_HumanCharacter_EndSpiritWalk = new NativeFunction(

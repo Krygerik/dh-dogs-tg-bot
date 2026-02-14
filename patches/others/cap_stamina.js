@@ -1,6 +1,6 @@
 
 var CAP_STAMINA = 4.5;
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 var fn = base.add(0x2752480); // ADH_HumanCharacter::SetPlayerState
 
 function getString(fstrPtr){

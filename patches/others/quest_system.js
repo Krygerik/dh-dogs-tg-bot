@@ -93,7 +93,7 @@ var ThrallInventoryTable = {
 
 
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 var UDH_InventoryManager_AddInventory = new NativeFunction(base.add(0xDBC040), 'void', ['pointer', 'pointer', 'pointer', 'pointer', 'pointer', 'int8', 'pointer'], 'win64');
 var UClass_GetPrivateStaticClass = new NativeFunction(base.add(0x11F02E0), 'pointer', [], 'win64');
 var StaticFindObject = new NativeFunction(base.add(0x137AAA0), 'pointer', ['pointer', 'pointer', 'pointer', 'int8'], 'win64');

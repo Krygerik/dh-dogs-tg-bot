@@ -10,7 +10,7 @@
  * 4. AddClimber (actual climbing starts)
  */
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 if (base === null) {
     send('[ClimbMod] ERROR: Could not find module base address');

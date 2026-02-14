@@ -1,5 +1,5 @@
 // Find the base address of the game module
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 // void UpdateListenerPosition(float DeltaTime); // Function BP_Spyglass_Inventory.BP_Spyglass_Inventory_C.UpdateListenerPosition // (Public|BlueprintCallable|BlueprintEvent) // @ game+0x1355100
 // void OnChangedTarget(struct AActor* NewTarget); // Function BP_Spyglass_Inventory.BP_Spyglass_Inventory_C.OnChangedTarget // (Public|BlueprintCallable|BlueprintEvent) // @ game+0x1355100

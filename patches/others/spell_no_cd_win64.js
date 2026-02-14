@@ -1,6 +1,6 @@
 //スペルCDなし
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 var ADH_HumanCharacter_AddStartingInventory_addr = base.add(0xD46F10);
 var ADH_SpellManager_CastSpell_addr = base.add(0xE634F0);

@@ -6,7 +6,7 @@
  * Based on quest_system.js approach
  */
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 if (base === null) {
     send('[StartingTools] ERROR: Could not find module base address');

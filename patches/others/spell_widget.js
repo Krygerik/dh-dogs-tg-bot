@@ -1,5 +1,5 @@
 // Find the base address of the game module
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 // var ABP_Rigging_C__GetClimbableMesh = new NativeFunction(base.add(0x1355100), 'pointer', ['bool'], 'win64');
 // Interceptor.attach(ABP_Rigging_C__GetClimbableMesh, {

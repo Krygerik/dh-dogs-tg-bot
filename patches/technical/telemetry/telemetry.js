@@ -1,7 +1,7 @@
 'use strict';
 
 const MODULE_NAME = 'DreadHungerServer-Win64-Shipping.exe';
-const base = Module.findBaseAddress(MODULE_NAME);
+const base = Process.getModuleByName(MODULE_NAME).base;
 
 if (base === null) {
   throw new Error(`Failed to find base address of ${MODULE_NAME}`);
@@ -24,9 +24,9 @@ const OFFSETS = {
   RepMovement: 0x60,
   RepMovementLocation: 0x18,
   CharacterHealth: 0x94c,
-  HumanHunger: 0x2683,
-  HumanWarmth: 0x2686,
-  HumanTemperature: 0x2693,
+  HumanHunger: 0x1008,
+  HumanWarmth: 0x1014,
+  HumanTemperature: 0x11c0,
   PlayerStateIsDead: 0x570,
   PlayerStateIsThrall: 0x572,
   PlayerStateCannibalLevel: 0x588,
@@ -899,31 +899,21 @@ function handleCommand(command) {
     }
     if (command.params?.hunger != null) {
       const raw = Number(command.params.hunger);
-      const scaled = raw <= 1.5 ? raw * 100 : raw;
+      const pct = raw <= 1.5 ? raw * 100 : raw;
       try {
-        Human_SetCurrentHunger(pawn, scaled);
+        Human_SetCurrentHunger(pawn, pct);
       } catch (e) {}
       try {
         pawn.add(OFFSETS.HumanHunger).writeFloat(raw);
       } catch (e) {}
     }
     if (command.params?.warmth != null) {
-      const raw = Number(command.params.warmth);
-      const scaled = raw <= 1.5 ? raw * 100 : raw;
       try {
-        Human_SetCurrentWarmth(pawn, scaled);
-      } catch (e) {}
-      try {
-        pawn.add(OFFSETS.HumanWarmth).writeFloat(raw);
+        pawn.add(OFFSETS.HumanWarmth).writeFloat(Number(command.params.warmth));
       } catch (e) {}
     } else if (command.params?.cold != null) {
-      const raw = Number(command.params.cold);
-      const scaled = raw <= 1.5 ? raw * 100 : raw;
       try {
-        Human_SetCurrentWarmth(pawn, scaled);
-      } catch (e) {}
-      try {
-        pawn.add(OFFSETS.HumanWarmth).writeFloat(raw);
+        pawn.add(OFFSETS.HumanWarmth).writeFloat(Number(command.params.cold));
       } catch (e) {}
     }
     if (command.params?.mana != null) {

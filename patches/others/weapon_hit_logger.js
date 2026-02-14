@@ -6,7 +6,7 @@
  * IMPORTANT: TYPE_48 = CCT_POISON (Яд/Poison)
  */
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 if (base === null) {
     send('[WeaponHitLogger] ERROR: Could not find module base address');

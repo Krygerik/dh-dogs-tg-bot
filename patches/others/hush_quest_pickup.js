@@ -7,7 +7,7 @@
  * Uses pickup action instead of direct AddInventory
  */
 
-var base = Module.findBaseAddress('DreadHungerServer-Win64-Shipping.exe');
+var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
 
 // Function addresses
 var ADH_HumanCharacter_AddStartingInventory_addr = base.add(0xD46F10);

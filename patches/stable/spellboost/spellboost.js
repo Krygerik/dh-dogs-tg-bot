@@ -1,6 +1,6 @@
 
 
-var base = Module.findBaseAddress("DreadHungerServer-Win64-Shipping.exe");
+var base = Process.getModuleByName("DreadHungerServer-Win64-Shipping.exe").base;
 var ADH_SpellManager_CastSpell_addr = base.add(0xE634F0);
 
 var UClass_GetPrivateStaticClass = new NativeFunction(base.add(0x11F02E0), 'pointer', [], 'win64');

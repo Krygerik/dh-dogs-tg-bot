@@ -1,5 +1,5 @@
 const MODULE_NAME = "DreadHungerServer-Win64-Shipping.exe";
-const base = Module.findBaseAddress(MODULE_NAME);
+const base = Process.getModuleByName(MODULE_NAME).base;
 
 if (base === null) {
     throw new Error(`Failed to find base address of ${MODULE_NAME}`);

@@ -5,7 +5,7 @@ console.log("Process ID: " + Process.id);
 console.log("Process Name: " + Process.name);
 
 
-var base = Module.findBaseAddress("DreadHungerServer-Win64-Shipping.exe");
+var base = Process.getModuleByName("DreadHungerServer-Win64-Shipping.exe").base;
 function randomNum(max) {
   return Math.floor(Math.random() * max);
 }
