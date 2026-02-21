@@ -1,11 +1,12 @@
 # Документация
 
-Документация проекта находится в `docs/`.
+## Архитектура
+- [Архитектура проекта](architecture.md) — модульная структура, граф зависимостей, ключевые компоненты
 
-Документация по фичам:
-- `docs/features/`
-  - `docs/features/mods-catalog/README.md`
-  - `docs/features/server-list-manage/README.md`
+## Фичи
+- [Каталог модов](features/mods-catalog.md) — API модов, коллекции, клиентский UI
+- [Управление сессиями](features/server-list-manage.md) — страница Manage, телеметрия, operator control
 
-Справочники:
-- `docs/reference/`
+## Справочники
+- [Карты](reference/maps.md) — maps.json, локализация, коллекции
+- [Custom Modifiers](reference/custom_modifiers.md) — модификаторы баланса, пресеты
