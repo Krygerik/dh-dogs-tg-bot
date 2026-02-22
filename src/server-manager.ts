@@ -41,17 +41,12 @@ export class ServerManager {
     if (!map) {
       throw new Error(`Unknown map: ${mapName}`);
     }
-    if (this.config.maxSessions > 0 && this.sessions.size >= this.config.maxSessions) {
-      throw new Error('Maximum sessions limit reached');
-    }
-
     const port = this.getNextPort();
     if (!port) {
       throw new Error('No free ports available');
     }
 
-    const baseParams = sessionParamsOverride ?? this.config.sessionParams;
-    const sessionParams = buildSessionParams(baseParams, customModifiers ?? {});
+    const sessionParams = buildSessionParams(sessionParamsOverride ?? "", customModifiers ?? {});
     const mapArg = buildMapArg(map.serverValue, sessionParams, port);
     const child = spawn(this.config.binaryPath, [mapArg, '-log'], {
       cwd: this.config.binaryDir,

@@ -4,6 +4,16 @@ import { ServerManager } from './server-manager';
 import { escapeMarkdown, sendMarkdownSafe, buildInlineKeyboard } from './utils/telegram';
 import { formatDuration } from './utils/parse';
 import { readLogTail } from './utils/logging';
+import { listStableMods, listModCollections, resolveModScripts } from './reference/mods';
+
+function resolveCollectionMods(collectionId: string): { scripts: string[]; ids: string[] } {
+  const stableMods = listStableMods();
+  const collections = listModCollections(stableMods);
+  const collection = collections.find((c) => c.id === collectionId);
+  if (!collection) return { scripts: [], ids: [] };
+  const { scripts } = resolveModScripts(collection.mods);
+  return { scripts, ids: collection.mods };
+}
 
 const dogFacts = [
   '🐕 У собак обоняние примерно в 40 раз сильнее, чем у человека!',
@@ -199,7 +209,13 @@ export function registerBotHandlers(
       const safeMapName = escapeMarkdown(mapName);
       sendMarkdownSafe(bot, chatId, `⏳ Запускаю *${safeMapName}*...`);
       try {
-        const session = await serverManager.startSession(mapName);
+        const mapConfig = config.maps.find(
+          (m) => m.name === mapName || m.serverValue === mapName
+        );
+        const { scripts: modScripts, ids: modIds } = mapConfig?.defaultCollection
+          ? resolveCollectionMods(mapConfig.defaultCollection)
+          : { scripts: [], ids: [] };
+        const session = await serverManager.startSession(mapName, undefined, undefined, modScripts, modIds);
         const safeSessionName = escapeMarkdown(session.map.name);
         sendMarkdownSafe(
           bot,
@@ -224,10 +240,11 @@ export function registerBotHandlers(
       const parts = data.replace('run_test:', '').trim().split(':');
       const testMode = parts[0];
       const mapName = parts.slice(1).join(':').trim();
-      const testParams =
+      const testModifiers: Record<string, number> =
         testMode === 'duo'
-          ? 'maxplayers=2?thralls=2'
-          : 'maxplayers=1?thralls=1';
+          ? { maxplayers: 2, thralls: 2 }
+          : { maxplayers: 1, thralls: 1 };
+      const { scripts: modScripts, ids: modIds } = resolveCollectionMods('Solo_Duo');
       const safeMapName = escapeMarkdown(mapName);
       sendMarkdownSafe(
         bot,
@@ -235,7 +252,7 @@ export function registerBotHandlers(
         `⏳ Тестовый запуск *${safeMapName}* (${testMode})...`
       );
       try {
-        const session = await serverManager.startSession(mapName, testParams, 'test');
+        const session = await serverManager.startSession(mapName, undefined, 'test', modScripts, modIds, testModifiers);
         const safeSessionName = escapeMarkdown(session.map.name);
         sendMarkdownSafe(
           bot,

@@ -49,8 +49,6 @@ BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 PUBLIC_IP=185.17.66.195
 BINARY_PATH=C:\Users\Server\WindowsServer\DreadHunger\Binaries\Win64\DreadHungerServer-Win64-Shipping.exe
 PORTS=7777-7782
-MAX_SESSIONS=2
-SESSION_PARAMS=daysbeforeblizzard=3?maxplayers=8?thralls=2
 FRIDA_PATH=.\frida\python_loader.bat
 API_TOKEN=change_me
 ```
@@ -72,8 +70,6 @@ start-bot.bat
 | `PUBLIC_IP` | Публичный IP для игроков | `185.17.66.195` |
 | `BINARY_PATH` | Путь к `DreadHungerServer-Win64-Shipping.exe` | Абсолютный путь |
 | `PORTS` | Порты (список/диапазоны) | `7777,8000-8010` |
-| `MAX_SESSIONS` | Макс. сессий (0 = без лимита) | `0` |
-| `SESSION_PARAMS` | Параметры сессии | `maxplayers=8?thralls=2` |
 | `FRIDA_PATH` | Путь к Frida инжектору (опц.) | `.\frida\python_loader.bat` |
 | `API_TOKEN` | Токен API | `change_me` |
 | `TELEMETRY_ENABLE` | Включить Frida‑телеметрию | `true` |

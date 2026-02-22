@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "mcp__acp__Bash",
-      "mcp__acp__Write"
+      "mcp__acp__Write",
+      "Bash(node -e:*)",
+      "Bash(del \"D:\\\\steam\\\\steamapps\\\\common\\\\Dread Hunger\\\\WindowsServer\\\\dh-dogs-tg-bot\\\\gen_gltf.js\" \"D:\\\\steam\\\\steamapps\\\\common\\\\Dread Hunger\\\\WindowsServer\\\\dh-dogs-tg-bot\\\\test.txt\")",
+      "Bash(python -c:*)",
+      "Bash(dir:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(/tmp/gen_axe2.py:*)",
+      "Bash(ls:*)"
     ]
   }
 }

@@ -52,15 +52,12 @@ export function buildConfig(): ServerConfig {
   }
 
   const ports = parsePortSpec(process.env.PORTS ?? "7777");
-  const maxSessions = Number.parseInt(process.env.MAX_SESSIONS ?? "0", 10);
-  if (Number.isNaN(maxSessions) || maxSessions < 0) {
-    throw new Error("MAX_SESSIONS must be a non-negative integer");
-  }
 
   const resolvedBinaryPath = resolveBinaryPath(binaryPath);
   const mapRefs = loadMapReferences().map((item) => ({
     name: item.name,
     serverValue: item.serverValue,
+    defaultCollection: item.defaultCollection,
   }));
   if (mapRefs.length === 0) {
     throw new Error("Map references are empty. Check reference/maps.json");
@@ -79,9 +76,7 @@ export function buildConfig(): ServerConfig {
     binaryPath: resolvedBinaryPath,
     binaryDir: path.dirname(resolvedBinaryPath),
     ports,
-    maxSessions,
     maps: mapRefs,
-    sessionParams: process.env.SESSION_PARAMS ?? "maxplayers=8",
     initSignature: DEFAULT_INIT_SIGNATURE,
     initTimeoutMs: 30000,
     fridaPath: process.env.FRIDA_PATH ?? "",

@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 export type MapConfig = {
   name: string;
   serverValue: string;
+  defaultCollection?: string;
 };
 
 export type MapReference = {
@@ -46,9 +47,7 @@ export type ServerConfig = {
   binaryPath: string;
   binaryDir: string;
   ports: number[];
-  maxSessions: number;
   maps: MapConfig[];
-  sessionParams: string;
   initSignature: string;
   initTimeoutMs: number;
   fridaPath: string;

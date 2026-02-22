@@ -399,7 +399,7 @@ Presets предназначены для **стандартизированны
 - `name` (string, required): отображаемое имя (может быть переопределено локализацией).
 - `description` (string, optional): краткое описание для UI.
 - `applyMode` (array, required): допустимые режимы применения: `next_session`, `restart_session`.
-- `sessionParamsOverride` (string, optional): строка параметров, аналогичная `SESSION_PARAMS`.
+- `sessionParamsOverride` (string, optional): строка параметров запуска сервера (например, `daysbeforeblizzard=2?maxplayers=8?thralls=3`).
   Используется при старте следующей сессии (или при рестарте).
 - `world` (object, optional): параметры мира (минимум `timeOfDay` если поддерживается).
   Другие поля добавляются только после подтверждения, что игра их хранит/читает на сервере.
