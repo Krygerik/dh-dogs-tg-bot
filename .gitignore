@@ -5,3 +5,4 @@ dist/
 python_scripts/
 /scripts/server.map
 /scripts/server.pid
+data/stats.json

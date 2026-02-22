@@ -5,6 +5,7 @@ import { escapeMarkdown, sendMarkdownSafe, buildInlineKeyboard } from './utils/t
 import { formatDuration } from './utils/parse';
 import { readLogTail } from './utils/logging';
 import { listStableMods, listModCollections, resolveModScripts } from './reference/mods';
+import { getStatsReport } from './stats/stats-service';
 
 function resolveCollectionMods(collectionId: string): { scripts: string[]; ids: string[] } {
   const stableMods = listStableMods();
@@ -67,6 +68,9 @@ export function registerBotHandlers(
 /status — Статус сервера и активных сессий
 /log — Лог выбранной сессии
 /testing — Тестовый запуск (maxplayers=1?thralls=1)
+
+📊 *Статистика:*
+/stats — Статистика игровых сессий
 
 📋 *Общие команды:*
 /start — Приветственное сообщение
@@ -320,6 +324,60 @@ export function registerBotHandlers(
       const header = `📜 Лог сессии ${session.map.name} (${session.port})`;
       const message = `${header}\n\n${tail || 'Лог пуст'}`;
       bot.sendMessage(chatId, message);
+    }
+  });
+
+  // /stats - Session statistics
+  bot.onText(/\/stats/, async (msg) => {
+    const chatId = msg.chat.id;
+    try {
+      const report = await getStatsReport();
+
+      const totalHours = (report.totalPlaytimeSeconds / 3600).toFixed(1);
+      const avgMins = Math.round(report.averageSessionSeconds / 60);
+
+      const topByGames = report.topPlayersByGames.slice(0, 5)
+        .map((p, i) => `  ${i + 1}\\. ${escapeMarkdown(p.name)} \\(${p.games} игр\\)`)
+        .join('\n');
+
+      const topByWinrate = report.topPlayersByWinrate.slice(0, 5)
+        .map((p, i) => `  ${i + 1}\\. ${escapeMarkdown(p.name)} — ${p.winrate}% \\(${p.wins}/${p.games}\\)`)
+        .join('\n');
+
+      const outcomeLabel = (outcome: string) => {
+        if (outcome === 'humans_win') return 'люди победили';
+        if (outcome === 'cannibals_win') return 'каннибалы победили';
+        return 'неизвестно';
+      };
+
+      const recentLines = report.recentSessions.slice(0, 5)
+        .map((s) => {
+          const mins = Math.round(s.durationSeconds / 60);
+          const mapName = escapeMarkdown(s.map);
+          return `  ${mapName} — ${mins}мин — ${escapeMarkdown(outcomeLabel(s.outcome))}`;
+        })
+        .join('\n');
+
+      const text = [
+        `📊 *Статистика сервера*`,
+        ``,
+        `Всего сессий: ${report.totalSessions}`,
+        `Суммарное время: ${totalHours}ч`,
+        `Средняя сессия: ${avgMins} мин`,
+        ``,
+        `*Топ игроков по играм:*`,
+        topByGames || '  \\(нет данных\\)',
+        ``,
+        `*Топ игроков по винрейту* \\(мин\\. 3 игры\\):`,
+        topByWinrate || '  \\(нет данных\\)',
+        ``,
+        `*Последние 5 сессий:*`,
+        recentLines || '  \\(нет данных\\)',
+      ].join('\n');
+
+      sendMarkdownSafe(bot, chatId, text);
+    } catch (error) {
+      sendMarkdownSafe(bot, chatId, `❌ Не удалось загрузить статистику: ${escapeMarkdown((error as Error).message)}`);
     }
   });
 

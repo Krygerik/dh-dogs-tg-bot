@@ -9,6 +9,8 @@ import { listStableMods, listModCollections, resolveModScripts, parseMods } from
 import { loadCustomModifiers, parseCustomModifiers } from './reference/modifiers';
 import { loadRoleReferences } from './reference/roles';
 import { loadItemReferences } from './reference/items';
+import { getStatsReport, recordSessionFinalStats } from './stats/stats-service';
+import { PlayerRecord } from './stats/stats-types';
 
 export function createApiServer(config: ServerConfig, serverManager: ServerManager) {
   const server = http.createServer(async (req, res) => {
@@ -276,6 +278,26 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const ok = await serverManager.stopSession(port);
         sendJson(res, 200, { ok });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/stats') {
+        const report = await getStatsReport();
+        sendJson(res, 200, { ok: true, ...report });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/session-stats') {
+        const body = await readJsonBody(req);
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+        const players = Array.isArray(body.players) ? (body.players as PlayerRecord[]) : [];
+        const winningTeam = typeof body.winningTeam === 'number' ? body.winningTeam : 0;
+        if (!sessionId) {
+          sendJson(res, 400, { ok: false, error: 'sessionId is required' });
+          return;
+        }
+        await recordSessionFinalStats(sessionId, players, winningTeam);
+        sendJson(res, 200, { ok: true });
         return;
       }
 

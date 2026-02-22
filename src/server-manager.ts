@@ -7,6 +7,7 @@ import { buildSessionParams, buildMapArg } from './utils/parse';
 import { killProcessTree, wrapCommand, waitForSignature, waitForSignatureWithHandlers } from './utils/process';
 import { attachRealtimeLogging } from './utils/logging';
 import { loadMapReferences } from './reference/maps';
+import { createStatsSessionId, recordSessionEnd } from './stats/stats-service';
 
 export class ServerManager {
   private readonly sessions = new Map<number, RunningSession>();
@@ -85,8 +86,14 @@ export class ServerManager {
       if (!fridaScripts.includes(telemetryScript)) {
         fridaScripts.push(telemetryScript);
       }
+      const sessionStatsScript = 'patches/technical/session_stats/session_stats.js';
+      if (!fridaScripts.includes(sessionStatsScript)) {
+        fridaScripts.push(sessionStatsScript);
+      }
       telemetryPort = this.config.telemetryBasePort + port;
     }
+
+    const statsSessionId = createStatsSessionId();
 
     if (this.config.fridaPath) {
       await this.runFrida(
@@ -96,10 +103,10 @@ export class ServerManager {
         logPath,
         fridaScripts,
         telemetryPort,
-        port
+        port,
+        statsSessionId
       );
     }
-
     const session: RunningSession = {
       port,
       pid: child.pid,
@@ -110,11 +117,16 @@ export class ServerManager {
       customModifiers: customModifiers ?? {},
       telemetryPort,
       process: child,
+      statsSessionId,
     };
 
     this.sessions.set(port, session);
-    child.on('exit', () => {
+    child.on('exit', async (code) => {
+      const s = this.sessions.get(port);
+      if (!s) return; // already handled by stopSession
       this.sessions.delete(port);
+      const endReason = code === 0 ? 'natural' : 'crash';
+      await recordSessionEnd(s, s.statsSessionId, endReason);
     });
 
     return session;
@@ -125,11 +137,10 @@ export class ServerManager {
     if (!session) {
       return false;
     }
-    const killed = await killProcessTree(session.pid);
-    if (killed) {
-      this.sessions.delete(port);
-    }
-    return killed;
+    // Delete before kill so the child 'exit' handler skips double-recording
+    this.sessions.delete(port);
+    await recordSessionEnd(session, session.statsSessionId, 'admin_stop');
+    return killProcessTree(session.pid);
   }
 
   private getNextPort(): number | null {
@@ -153,7 +164,8 @@ export class ServerManager {
     logPath?: string,
     modScripts?: string[],
     telemetryPort?: number,
-    sessionPort?: number
+    sessionPort?: number,
+    statsSessionId?: string
   ): Promise<void> {
     const resolvedFridaPath = resolveFridaPath(this.config.fridaPath);
     const fridaArgs = [pid, mapValue];
@@ -168,6 +180,9 @@ export class ServerManager {
     }
     if (typeof sessionPort === 'number') {
       fridaArgs.push('--session-port', sessionPort);
+    }
+    if (statsSessionId) {
+      fridaArgs.push('--session-id', statsSessionId);
     }
     const { command, args } = wrapCommand(resolvedFridaPath, fridaArgs);
     const frida = spawn(command, args, {

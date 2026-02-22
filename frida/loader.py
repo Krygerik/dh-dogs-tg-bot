@@ -5,6 +5,7 @@ import psutil
 import frida
 import json
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 
@@ -110,15 +111,47 @@ class TelemetryBridge:
 
 
 telemetry_bridge = None
+current_session_id = None
+api_port = 8787
+
+
+def post_session_stats(session_id, data):
+    try:
+        body = json.dumps({
+            "sessionId": session_id,
+            "players": data.get("players", []),
+            "winningTeam": data.get("winningTeam", 0),
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{api_port}/session-stats",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            print(f"[session_stats] posted to API: {resp.status}")
+    except Exception as exc:
+        print(f"[session_stats] failed to post to API: {exc}")
 
 
 def on_message(msg, data):
     if msg.get("type") == "send":
         payload = msg.get("payload")
-        if isinstance(payload, dict) and payload.get("type") == "telemetry":
-            if telemetry_bridge:
-                telemetry_bridge.update_state(payload.get("data"))
-            return
+        if isinstance(payload, dict):
+            if payload.get("type") == "telemetry":
+                if telemetry_bridge:
+                    telemetry_bridge.update_state(payload.get("data"))
+                return
+            if payload.get("type") == "session_stats":
+                if current_session_id:
+                    threading.Thread(
+                        target=post_session_stats,
+                        args=(current_session_id, payload.get("data", {})),
+                        daemon=True,
+                    ).start()
+                else:
+                    print("[session_stats] received but no session_id available")
+                return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
         return
@@ -222,12 +255,12 @@ def close_terminal():
 
 def parse_pid_from_args(argv):
     """
-    Usage: <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>]
+    Usage: <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>] [--session-id <ID>]
     """
     print("argv: ", argv)
     if len(argv) < 3:
         raise ValueError(
-            f"Usage: {argv[0]} <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>]"
+            f"Usage: {argv[0]} <PID> <MapValue> [Mode] [--mods-json <JSON>] [--mod <PATH>...] [--telemetry-port <PORT>] [--session-port <PORT>] [--session-id <ID>]"
         )
     pid_str = argv[1]
     map_str = argv[2]
@@ -236,6 +269,7 @@ def parse_pid_from_args(argv):
     mods_list = []
     telemetry_port = None
     session_port = None
+    session_id = None
     idx = 3
     while idx < len(argv):
         token = argv[idx]
@@ -263,6 +297,12 @@ def parse_pid_from_args(argv):
             session_port = int(argv[idx + 1])
             idx += 2
             continue
+        if token == "--session-id":
+            if idx + 1 >= len(argv):
+                raise ValueError("Missing value for --session-id")
+            session_id = argv[idx + 1]
+            idx += 2
+            continue
         if not mode:
             mode = token.lower()
             idx += 1
@@ -273,14 +313,16 @@ def parse_pid_from_args(argv):
     pid = int(pid_str)
     if pid <= 0:
         raise ValueError(f"Invalid PID: {pid!r} (must be > 0)")
-    return pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port
+    return pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port, session_id
 
 # Main logic
 
 
 if __name__ == "__main__":
     try:
-        pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port = parse_pid_from_args(sys.argv)
+        pid, map_str, mode, mods_json, mods_list, telemetry_port, session_port, session_id = parse_pid_from_args(sys.argv)
+        if session_id:
+            current_session_id = session_id
         print(f"PID: {pid}. Attaching Frida...")
 
         # Attach to the process using Frida

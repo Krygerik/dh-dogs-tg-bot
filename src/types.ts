@@ -69,4 +69,5 @@ export type GameSession = {
 
 export type RunningSession = GameSession & {
   process: ReturnType<typeof spawn>;
+  statsSessionId: string;
 };
