@@ -86,9 +86,9 @@ export class ServerManager {
       if (!fridaScripts.includes(telemetryScript)) {
         fridaScripts.push(telemetryScript);
       }
-      const sessionStatsScript = 'patches/technical/session_stats/session_stats.js';
-      if (!fridaScripts.includes(sessionStatsScript)) {
-        fridaScripts.push(sessionStatsScript);
+      const scoreboardStatsScript = 'patches/technical/scoreboard_stats/scoreboard_stats.js';
+      if (!fridaScripts.includes(scoreboardStatsScript)) {
+        fridaScripts.push(scoreboardStatsScript);
       }
       telemetryPort = this.config.telemetryBasePort + port;
     }

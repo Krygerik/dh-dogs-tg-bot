@@ -65,6 +65,7 @@ export type GameSession = {
   mods: string[];
   customModifiers: Record<string, number>;
   telemetryPort?: number;
+  statsSessionId: string;
 };
 
 export type RunningSession = GameSession & {

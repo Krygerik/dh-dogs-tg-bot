@@ -2,11 +2,25 @@ export type SessionEndReason = 'natural' | 'admin_stop' | 'crash' | 'unknown';
 
 export type GameOutcome = 'humans_win' | 'cannibals_win' | 'unknown';
 
+export interface MatchStatEntry {
+  statType: number;
+  value: number;
+}
+
 export interface PlayerRecord {
   name: string;
   roleName: string | null;
   traitor: boolean;
   isDead: boolean;
+  // Поля из scoreboard_stats (опциональны — могут отсутствовать в старых записях)
+  isDisconnected?: boolean;
+  deathCount?: number;
+  victimCount?: number;
+  cannibalLevel?: number;
+  prestige?: number;
+  rank?: number;
+  experience?: number;
+  matchStats?: MatchStatEntry[];
 }
 
 export interface SessionRecord {

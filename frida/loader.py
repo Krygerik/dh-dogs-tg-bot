@@ -152,6 +152,9 @@ def on_message(msg, data):
                 else:
                     print("[session_stats] received but no session_id available")
                 return
+            if payload.get("type") == "scoreboard_stats_error":
+                print(f"[scoreboard_stats] error from script: {payload.get('error')}")
+                return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
         return

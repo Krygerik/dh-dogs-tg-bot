@@ -5,7 +5,8 @@ import { escapeMarkdown, sendMarkdownSafe, buildInlineKeyboard } from './utils/t
 import { formatDuration } from './utils/parse';
 import { readLogTail } from './utils/logging';
 import { listStableMods, listModCollections, resolveModScripts } from './reference/mods';
-import { getStatsReport } from './stats/stats-service';
+import { getStatsReport, getSessionRecord } from './stats/stats-service';
+import { SessionRecord } from './stats/stats-types';
 
 function resolveCollectionMods(collectionId: string): { scripts: string[]; ids: string[] } {
   const stableMods = listStableMods();
@@ -325,13 +326,80 @@ export function registerBotHandlers(
       const message = `${header}\n\n${tail || 'Лог пуст'}`;
       bot.sendMessage(chatId, message);
     }
+
+    if (data.startsWith('stats_session:')) {
+      const sessionId = data.replace('stats_session:', '').trim();
+      try {
+        // Сначала ищем активную сессию в памяти (данных игроков ещё нет, но можно показать текущее состояние)
+        const activeSession = serverManager.listSessions().find((s) => s.statsSessionId === sessionId);
+        const record = await getSessionRecord(sessionId);
+
+        if (!record && !activeSession) {
+          sendMarkdownSafe(bot, chatId, '❌ Сессия не найдена\\.');
+          return;
+        }
+
+        if (record) {
+          sendMarkdownSafe(bot, chatId, formatSessionReport(record));
+          return;
+        }
+
+        // Активная сессия, данных финального экрана ещё нет
+        const uptime = formatDuration(Date.now() - activeSession!.startedAt.getTime());
+        sendMarkdownSafe(
+          bot,
+          chatId,
+          [
+            `🟢 *Сессия в процессе*`,
+            `🗺️ ${escapeMarkdown(activeSession!.map.name)}`,
+            `🔌 Порт: \`${activeSession!.port}\``,
+            `⏱️ Аптайм: ${escapeMarkdown(uptime)}`,
+            ``,
+            `_Статистика появится после завершения матча_`,
+          ].join('\n')
+        );
+      } catch (error) {
+        sendMarkdownSafe(bot, chatId, `❌ Ошибка: ${escapeMarkdown((error as Error).message)}`);
+      }
+    }
   });
 
-  // /stats - Session statistics
+  function outcomeLabel(outcome: string): string {
+    if (outcome === 'humans_win') return 'Люди победили';
+    if (outcome === 'cannibals_win') return 'Каннибалы победили';
+    return 'Неизвестно';
+  }
+
+  function formatSessionReport(s: SessionRecord): string {
+    const mins = Math.round(s.durationSeconds / 60);
+    const mapName = escapeMarkdown(s.map);
+    const outcome = escapeMarkdown(outcomeLabel(s.outcome));
+    const date = s.endedAt ? s.endedAt.slice(0, 10) : '?';
+
+    const playerLines = s.players.map((p) => {
+      const role = p.roleName ? escapeMarkdown(p.roleName) : '?';
+      const team = p.traitor ? '☠️' : '👤';
+      const dead = p.isDead ? ' \\(погиб\\)' : '';
+      const dc = p.deathCount !== undefined ? ` смерт: ${p.deathCount}` : '';
+      const kills = p.victimCount !== undefined ? ` убийств: ${p.victimCount}` : '';
+      return `  ${team} ${escapeMarkdown(p.name)} — ${role}${dead}${dc}${kills}`;
+    }).join('\n');
+
+    return [
+      `🗺️ *${mapName}*`,
+      `📅 ${escapeMarkdown(date)} \\| ⏱️ ${mins} мин`,
+      `🏆 ${outcome}`,
+      ``,
+      playerLines || '  \\(нет данных об игроках\\)',
+    ].join('\n');
+  }
+
+  // /stats — общая статистика или статистика конкретной сессии
   bot.onText(/\/stats/, async (msg) => {
     const chatId = msg.chat.id;
     try {
       const report = await getStatsReport();
+      const activeSessions = serverManager.listSessions();
 
       const totalHours = (report.totalPlaytimeSeconds / 3600).toFixed(1);
       const avgMins = Math.round(report.averageSessionSeconds / 60);
@@ -344,12 +412,6 @@ export function registerBotHandlers(
         .map((p, i) => `  ${i + 1}\\. ${escapeMarkdown(p.name)} — ${p.winrate}% \\(${p.wins}/${p.games}\\)`)
         .join('\n');
 
-      const outcomeLabel = (outcome: string) => {
-        if (outcome === 'humans_win') return 'люди победили';
-        if (outcome === 'cannibals_win') return 'каннибалы победили';
-        return 'неизвестно';
-      };
-
       const recentLines = report.recentSessions.slice(0, 5)
         .map((s) => {
           const mins = Math.round(s.durationSeconds / 60);
@@ -358,7 +420,7 @@ export function registerBotHandlers(
         })
         .join('\n');
 
-      const text = [
+      const summaryText = [
         `📊 *Статистика сервера*`,
         ``,
         `Всего сессий: ${report.totalSessions}`,
@@ -375,7 +437,30 @@ export function registerBotHandlers(
         recentLines || '  \\(нет данных\\)',
       ].join('\n');
 
-      sendMarkdownSafe(bot, chatId, text);
+      // Кнопки: активные сессии + последние завершённые
+      const sessionButtons: Array<{ text: string; data: string }> = [];
+
+      for (const session of activeSessions) {
+        sessionButtons.push({
+          text: `🟢 ${session.map.name} :${session.port}`,
+          data: `stats_session:${session.statsSessionId}`,
+        });
+      }
+
+      for (const s of report.recentSessions.slice(0, 5)) {
+        const mins = Math.round(s.durationSeconds / 60);
+        const label = `${s.map} ${mins}м ${outcomeLabel(s.outcome).split(' ')[0]}`;
+        sessionButtons.push({
+          text: label,
+          data: `stats_session:${s.sessionId}`,
+        });
+      }
+
+      const options: TelegramBot.SendMessageOptions = sessionButtons.length > 0
+        ? { reply_markup: { inline_keyboard: buildInlineKeyboard(sessionButtons) } }
+        : {};
+
+      sendMarkdownSafe(bot, chatId, summaryText, options);
     } catch (error) {
       sendMarkdownSafe(bot, chatId, `❌ Не удалось загрузить статистику: ${escapeMarkdown((error as Error).message)}`);
     }

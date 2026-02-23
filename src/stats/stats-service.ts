@@ -13,6 +13,13 @@ export function createStatsSessionId(): string {
   return crypto.randomUUID();
 }
 
+// Buffer for final stats that arrive before the session record is written
+interface PendingFinalStats {
+  players: PlayerRecord[];
+  outcome: GameOutcome;
+}
+const pendingFinalStats = new Map<string, PendingFinalStats>();
+
 export async function recordSessionEnd(
   session: RunningSession,
   statsSessionId: string,
@@ -22,6 +29,10 @@ export async function recordSessionEnd(
   const durationSeconds = Math.floor(
     (endedAt.getTime() - session.startedAt.getTime()) / 1000
   );
+
+  // Merge any already-arrived final stats (session_stats mod can post before process exits)
+  const pending = pendingFinalStats.get(statsSessionId);
+  pendingFinalStats.delete(statsSessionId);
 
   const record: SessionRecord = {
     sessionId: statsSessionId,
@@ -33,8 +44,8 @@ export async function recordSessionEnd(
     startedAt: session.startedAt.toISOString(),
     endedAt: endedAt.toISOString(),
     durationSeconds,
-    players: [],
-    outcome: 'unknown',
+    players: pending?.players ?? [],
+    outcome: pending?.outcome ?? 'unknown',
     endReason,
   };
 
@@ -51,7 +62,19 @@ export async function recordSessionFinalStats(
     winningTeam === 2 ? 'cannibals_win' :
     'unknown';
 
-  await statsStore.updateBySessionId(sessionId, { players, outcome });
+  // Try to update an existing record first; if not found yet, buffer for later
+  const sessions = await statsStore.readAll();
+  const exists = sessions.some((s) => s.sessionId === sessionId);
+  if (exists) {
+    await statsStore.updateBySessionId(sessionId, { players, outcome });
+  } else {
+    pendingFinalStats.set(sessionId, { players, outcome });
+  }
+}
+
+export async function getSessionRecord(sessionId: string): Promise<SessionRecord | null> {
+  const sessions = await statsStore.readAll();
+  return sessions.find((s) => s.sessionId === sessionId) ?? null;
 }
 
 export async function getStatsReport(): Promise<StatsReport> {
