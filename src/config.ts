@@ -8,6 +8,9 @@ export const DEFAULT_INIT_SIGNATURE =
   "LogInit: Display: Engine is initialized. Leaving FEngineLoop::Init()";
 export const API_PORT = 8787;
 export const API_TOKEN = (process.env.API_TOKEN ?? "").trim();
+// Если true — статистика собирается со всех сессий (в т.ч. с изменёнными модификаторами).
+// Только для разработки. В продакшне не устанавливать.
+export const STATS_ALL_SESSIONS = isTruthy(process.env.STATS_ALL_SESSIONS);
 export const TEST_PARAMS_SOLO = "maxplayers=1?thralls=1";
 export const TEST_PARAMS_DUO = "maxplayers=2?thralls=2";
 

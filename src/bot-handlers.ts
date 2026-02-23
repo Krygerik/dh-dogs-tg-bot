@@ -335,7 +335,7 @@ export function registerBotHandlers(
         const record = await getSessionRecord(sessionId);
 
         if (!record && !activeSession) {
-          sendMarkdownSafe(bot, chatId, '❌ Сессия не найдена\\.');
+          sendMarkdownSafe(bot, chatId, '❌ Сессия не найдена.');
           return;
         }
 
@@ -365,33 +365,82 @@ export function registerBotHandlers(
   });
 
   function outcomeLabel(outcome: string): string {
-    if (outcome === 'humans_win') return 'Люди победили';
-    if (outcome === 'cannibals_win') return 'Каннибалы победили';
+    if (outcome === 'humans_win') return 'Мирные победили';
+    if (outcome === 'cannibals_win') return 'Маньяки победили';
     return 'Неизвестно';
+  }
+
+  function endReasonLabel(reason: string): string {
+    if (reason === 'natural') return 'Штатное завершение';
+    if (reason === 'admin_stop') return 'Остановлен администратором';
+    if (reason === 'crash') return 'Аварийное завершение';
+    return 'Неизвестно';
+  }
+
+  function formatTime(iso: string): string {
+    // "2025-03-01T14:35:00.000Z" -> "01.03.2025 14:35"
+    try {
+      const d = new Date(iso);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch {
+      return iso.slice(0, 16).replace('T', ' ');
+    }
   }
 
   function formatSessionReport(s: SessionRecord): string {
     const mins = Math.round(s.durationSeconds / 60);
-    const mapName = escapeMarkdown(s.map);
-    const outcome = escapeMarkdown(outcomeLabel(s.outcome));
-    const date = s.endedAt ? s.endedAt.slice(0, 10) : '?';
+    const secs = s.durationSeconds % 60;
+    const duration = secs > 0 ? `${mins} мин ${secs} сек` : `${mins} мин`;
 
-    const playerLines = s.players.map((p) => {
-      const role = p.roleName ? escapeMarkdown(p.roleName) : '?';
-      const team = p.traitor ? '☠️' : '👤';
-      const dead = p.isDead ? ' \\(погиб\\)' : '';
-      const dc = p.deathCount !== undefined ? ` смерт: ${p.deathCount}` : '';
-      const kills = p.victimCount !== undefined ? ` убийств: ${p.victimCount}` : '';
-      return `  ${team} ${escapeMarkdown(p.name)} — ${role}${dead}${dc}${kills}`;
-    }).join('\n');
-
-    return [
-      `🗺️ *${mapName}*`,
-      `📅 ${escapeMarkdown(date)} \\| ⏱️ ${mins} мин`,
-      `🏆 ${outcome}`,
+    const lines: string[] = [
+      `🗺️ *${escapeMarkdown(s.map)}*`,
       ``,
-      playerLines || '  \\(нет данных об игроках\\)',
-    ].join('\n');
+      `📅 Начало: ${formatTime(s.startedAt)}`,
+      `🏁 Конец:  ${formatTime(s.endedAt)}`,
+      `⏱️ Длительность: ${duration}`,
+      ``,
+      `🏆 Итог: *${outcomeLabel(s.outcome)}*`,
+      `🔚 Причина: ${endReasonLabel(s.endReason)}`,
+    ];
+
+    if (s.mods.length > 0) {
+      lines.push(``, `🔧 *Моды:*`);
+      for (const mod of s.mods) {
+        lines.push(`  • ${escapeMarkdown(mod)}`);
+      }
+    }
+
+    const explorers = s.players.filter((p) => !p.traitor);
+    const traitors  = s.players.filter((p) => p.traitor);
+
+    if (s.players.length > 0) {
+      lines.push(``, `👤 *Мирные (${explorers.length}):*`);
+      if (explorers.length > 0) {
+        for (const p of explorers) {
+          const role = p.roleName ? escapeMarkdown(p.roleName) : 'неизв.';
+          const dead = p.isDead ? ' — погиб' : '';
+          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}`);
+        }
+      } else {
+        lines.push(`  (нет)`);
+      }
+
+      lines.push(``, `☠️ *Маньяки (${traitors.length}):*`);
+      if (traitors.length > 0) {
+        for (const p of traitors) {
+          const role = p.roleName ? escapeMarkdown(p.roleName) : 'неизв.';
+          const dead = p.isDead ? ' — погиб' : '';
+          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}`);
+        }
+      } else {
+        lines.push(`  (нет)`);
+      }
+    } else {
+      lines.push(``, `_Данные об игроках отсутствуют_`);
+    }
+
+    return lines.join('\n');
   }
 
   // /stats — общая статистика или статистика конкретной сессии
@@ -405,11 +454,11 @@ export function registerBotHandlers(
       const avgMins = Math.round(report.averageSessionSeconds / 60);
 
       const topByGames = report.topPlayersByGames.slice(0, 5)
-        .map((p, i) => `  ${i + 1}\\. ${escapeMarkdown(p.name)} \\(${p.games} игр\\)`)
+        .map((p, i) => `  ${i + 1}. ${escapeMarkdown(p.name)} (${p.games} игр)`)
         .join('\n');
 
       const topByWinrate = report.topPlayersByWinrate.slice(0, 5)
-        .map((p, i) => `  ${i + 1}\\. ${escapeMarkdown(p.name)} — ${p.winrate}% \\(${p.wins}/${p.games}\\)`)
+        .map((p, i) => `  ${i + 1}. ${escapeMarkdown(p.name)} — ${p.winrate}% (${p.wins}/${p.games})`)
         .join('\n');
 
       const recentLines = report.recentSessions.slice(0, 5)
@@ -428,13 +477,13 @@ export function registerBotHandlers(
         `Средняя сессия: ${avgMins} мин`,
         ``,
         `*Топ игроков по играм:*`,
-        topByGames || '  \\(нет данных\\)',
+        topByGames || '  (нет данных)',
         ``,
-        `*Топ игроков по винрейту* \\(мин\\. 3 игры\\):`,
-        topByWinrate || '  \\(нет данных\\)',
+        `*Топ игроков по винрейту* (мин. 3 игры):`,
+        topByWinrate || '  (нет данных)',
         ``,
         `*Последние 5 сессий:*`,
-        recentLines || '  \\(нет данных\\)',
+        recentLines || '  (нет данных)',
       ].join('\n');
 
       // Кнопки: активные сессии + последние завершённые

@@ -8,6 +8,7 @@ import {
   StatsReport,
 } from './stats-types';
 import { RunningSession } from '../types';
+import { STATS_ALL_SESSIONS } from '../config';
 
 export function createStatsSessionId(): string {
   return crypto.randomUUID();
@@ -20,11 +21,22 @@ interface PendingFinalStats {
 }
 const pendingFinalStats = new Map<string, PendingFinalStats>();
 
+function hasNonDefaultModifiers(customModifiers: Record<string, number>): boolean {
+  return Object.keys(customModifiers).length > 0;
+}
+
 export async function recordSessionEnd(
   session: RunningSession,
   statsSessionId: string,
   endReason: SessionEndReason
 ): Promise<void> {
+  // Сессии с нестандартными модификаторами не учитываются в статистике,
+  // если не включён флаг STATS_ALL_SESSIONS (режим разработки).
+  if (!STATS_ALL_SESSIONS && hasNonDefaultModifiers(session.customModifiers)) {
+    pendingFinalStats.delete(statsSessionId);
+    return;
+  }
+
   const endedAt = new Date();
   const durationSeconds = Math.floor(
     (endedAt.getTime() - session.startedAt.getTime()) / 1000

@@ -42,28 +42,12 @@ const OFF = {
   PlayerId:             0x224,
 
   // ADH_PlayerState own fields (Offset from dump.h):
-  MatchStats:           0x330,   // TArray<FPlayerMatchStat>  Size: 16
-  VictimIDs:            0x348,   // TArray<FUniqueNetIdRepl>  Size: 16
-  KillerID:             0x358,   // FUniqueNetIdRepl           Size: 40
-  CauseOfDeath:         0x380,   // UDH_DamageType*            Size: 8
   bIsDead:              0x570,   // bool
-  bIsDisconnected:      0x571,   // bool
   bIsThrall:            0x572,   // bool
-  CannibalLevel:        0x588,   // float
   SelectedRole:         0x590,   // UDH_PlayerRoleData*
-  PrestigeLevel:        0x598,   // int32
-  Auth_Experience:      0x610,   // int32
-  Auth_Rank:            0x614,   // int32
-  DeathCount:           0x630,   // int32
 
   // UDH_PlayerRoleData
   RoleNameFString:      0x48,    // FString (role display name)
-
-  // FPlayerMatchStat — предполагаемый макет: { int32 statType, int32 value }
-  // Судя по TMap<EPlayerMatchStatType, FText> StatDescriptions — enum 4 байта
-  MatchStat_Type:       0x0,     // int32 EPlayerMatchStatType
-  MatchStat_Value:      0x4,     // int32
-  MatchStat_Size:       0x8,     // размер одной записи FPlayerMatchStat
 };
 
 // RVA функций
@@ -115,26 +99,6 @@ function readTArrayPointers(baseAddr) {
   } catch (_) { return []; }
 }
 
-// Читает TArray<FPlayerMatchStat> — inline-структуры (не указатели)
-function readMatchStats(arrayBaseAddr) {
-  try {
-    const dataPtr = safeReadPointer(arrayBaseAddr);
-    if (!dataPtr) return [];
-    const count = arrayBaseAddr.add(8).readS32();
-    if (count <= 0 || count > 256) return [];
-    const result = [];
-    for (let i = 0; i < count; i++) {
-      const elem = dataPtr.add(i * OFF.MatchStat_Size);
-      const statType = safeRead(() => elem.add(OFF.MatchStat_Type).readS32());
-      const value    = safeRead(() => elem.add(OFF.MatchStat_Value).readS32());
-      if (statType !== null && value !== null) {
-        result.push({ statType, value });
-      }
-    }
-    return result;
-  } catch (_) { return []; }
-}
-
 const PlayerState_GetPlayerRole = new NativeFunction(
   base.add(RVA.GetPlayerRole),
   'int32', ['pointer'], 'win64'
@@ -165,14 +129,8 @@ function collectSnapshot() {
       const name = readFString(psPtr.add(OFF.PlayerName));
       if (!name) continue;
 
-      const isDead         = safeRead(() => psPtr.add(OFF.bIsDead).readU8()) !== 0;
-      const isDisconnected = safeRead(() => psPtr.add(OFF.bIsDisconnected).readU8()) !== 0;
-      const isThrall       = safeRead(() => psPtr.add(OFF.bIsThrall).readU8()) !== 0;
-      const cannibalLevel  = safeRead(() => psPtr.add(OFF.CannibalLevel).readFloat()) ?? 0;
-      const prestige       = safeRead(() => psPtr.add(OFF.PrestigeLevel).readS32()) ?? 0;
-      const experience     = safeRead(() => psPtr.add(OFF.Auth_Experience).readS32()) ?? 0;
-      const rank           = safeRead(() => psPtr.add(OFF.Auth_Rank).readS32()) ?? 0;
-      const deathCount     = safeRead(() => psPtr.add(OFF.DeathCount).readS32()) ?? 0;
+      const isDead   = safeRead(() => psPtr.add(OFF.bIsDead).readU8()) !== 0;
+      const traitor  = safeRead(() => psPtr.add(OFF.bIsThrall).readU8()) !== 0;
 
       // Имя роли
       let roleName = null;
@@ -187,26 +145,7 @@ function collectSnapshot() {
         }
       } catch (_) { roleName = null; }
 
-      // Количество жертв (VictimIDs — TArray, считаем длину)
-      const victimCount = safeRead(() => psPtr.add(OFF.VictimIDs).add(8).readS32()) ?? 0;
-
-      // Статистика матча
-      const matchStats = readMatchStats(psPtr.add(OFF.MatchStats));
-
-      players.push({
-        name,
-        roleName,
-        isThrall,
-        isDead,
-        isDisconnected,
-        cannibalLevel,
-        prestige,
-        experience,
-        rank,
-        deathCount,
-        victimCount: victimCount > 0 ? victimCount : 0,
-        matchStats,
-      });
+      players.push({ name, roleName, traitor, isDead });
     } catch (_) {
       // пропускаем игрока при ошибке
     }
