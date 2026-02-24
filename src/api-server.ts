@@ -290,7 +290,15 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
       if (req.method === 'POST' && url.pathname === '/session-stats') {
         const body = await readJsonBody(req);
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
-        const players = Array.isArray(body.players) ? (body.players as PlayerRecord[]) : [];
+        const players: PlayerRecord[] = Array.isArray(body.players)
+          ? body.players.map((p: any) => ({
+              name: typeof p.name === 'string' ? p.name : '',
+              roleName: typeof p.roleName === 'string' ? p.roleName : null,
+              traitor: Boolean(p.traitor),
+              isDead: Boolean(p.isDead),
+              damageToEnemy: typeof p.damageToEnemy === 'number' ? p.damageToEnemy : 0,
+            }))
+          : [];
         const winningTeam = typeof body.winningTeam === 'number' ? body.winningTeam : 0;
         if (!sessionId) {
           sendJson(res, 400, { ok: false, error: 'sessionId is required' });

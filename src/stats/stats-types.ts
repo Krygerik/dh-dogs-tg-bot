@@ -8,6 +8,8 @@ export interface PlayerRecord {
   /** true = Маньяк (Thrall/Cannibal), false = Мирный (Explorer) */
   traitor: boolean;
   isDead: boolean;
+  /** Суммарный урон по команде противника. 0 если данных нет. */
+  damageToEnemy: number;
 }
 
 export interface SessionRecord {
@@ -36,6 +38,7 @@ export interface StatsReport {
   averageSessionSeconds: number;
   topPlayersByGames: Array<{ name: string; games: number }>;
   topPlayersByWinrate: Array<{ name: string; wins: number; games: number; winrate: number }>;
+  topPlayersByDamage: Array<{ name: string; totalDamage: number; games: number; avgDamage: number }>;
   sessionsPerDay: Array<{ date: string; count: number }>;
   recentSessions: SessionRecord[];
 }

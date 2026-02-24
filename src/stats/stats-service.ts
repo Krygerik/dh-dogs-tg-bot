@@ -148,6 +148,31 @@ export async function getStatsReport(): Promise<StatsReport> {
     .sort((a, b) => b.winrate - a.winrate || b.games - a.games)
     .slice(0, 10);
 
+  // Топ игроков по суммарному урону по врагам (мин. 3 игры)
+  const damageMap = new Map<string, { totalDamage: number; games: number }>();
+  for (const s of sessions) {
+    for (const p of s.players) {
+      const dmg = p.damageToEnemy ?? 0;
+      const existing = damageMap.get(p.name);
+      if (existing) {
+        existing.totalDamage += dmg;
+        existing.games += 1;
+      } else {
+        damageMap.set(p.name, { totalDamage: dmg, games: 1 });
+      }
+    }
+  }
+  const topPlayersByDamage = [...damageMap.entries()]
+    .filter(([, d]) => d.games >= 3 && d.totalDamage > 0)
+    .map(([name, d]) => ({
+      name,
+      totalDamage: d.totalDamage,
+      games: d.games,
+      avgDamage: Math.round(d.totalDamage / d.games),
+    }))
+    .sort((a, b) => b.totalDamage - a.totalDamage)
+    .slice(0, 10);
+
   const recentSessions = sessions.slice(-10).reverse();
 
   return {
@@ -156,6 +181,7 @@ export async function getStatsReport(): Promise<StatsReport> {
     averageSessionSeconds,
     topPlayersByGames,
     topPlayersByWinrate,
+    topPlayersByDamage,
     sessionsPerDay,
     recentSessions,
   };
