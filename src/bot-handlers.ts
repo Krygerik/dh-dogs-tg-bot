@@ -220,7 +220,16 @@ export function registerBotHandlers(
         const { scripts: modScripts, ids: modIds } = mapConfig?.defaultCollection
           ? resolveCollectionMods(mapConfig.defaultCollection)
           : { scripts: [], ids: [] };
-        const session = await serverManager.startSession(mapName, undefined, undefined, modScripts, modIds);
+        const session = await serverManager.startSession(
+          mapName,
+          undefined,
+          undefined,
+          modScripts,
+          modIds,
+          undefined,
+          false,
+          true
+        );
         const safeSessionName = escapeMarkdown(session.map.name);
         sendMarkdownSafe(
           bot,
@@ -257,7 +266,16 @@ export function registerBotHandlers(
         `⏳ Тестовый запуск *${safeMapName}* (${testMode})...`
       );
       try {
-        const session = await serverManager.startSession(mapName, undefined, 'test', modScripts, modIds, testModifiers);
+        const session = await serverManager.startSession(
+          mapName,
+          undefined,
+          'test',
+          modScripts,
+          modIds,
+          testModifiers,
+          false,
+          true
+        );
         const safeSessionName = escapeMarkdown(session.map.name);
         sendMarkdownSafe(
           bot,

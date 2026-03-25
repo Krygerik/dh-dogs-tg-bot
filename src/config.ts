@@ -84,7 +84,6 @@ export function buildConfig(): ServerConfig {
     initTimeoutMs: 30000,
     fridaPath: process.env.FRIDA_PATH ?? "",
     fridaInitSignature: "Frida scripts have been injected.",
-    telemetryEnabled: isTruthy(process.env.TELEMETRY_ENABLE),
     telemetryBasePort,
   };
 }

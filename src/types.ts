@@ -52,7 +52,6 @@ export type ServerConfig = {
   initTimeoutMs: number;
   fridaPath: string;
   fridaInitSignature: string;
-  telemetryEnabled: boolean;
   telemetryBasePort: number;
 };
 

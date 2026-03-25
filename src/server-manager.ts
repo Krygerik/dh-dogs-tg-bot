@@ -25,7 +25,9 @@ export class ServerManager {
     fridaMode?: string,
     modScripts?: string[],
     modIds?: string[],
-    customModifiers?: Record<string, number>
+    customModifiers?: Record<string, number>,
+    enableTelemetry?: boolean,
+    enableScoreboardStats?: boolean
   ): Promise<GameSession> {
     let map = this.config.maps.find(
       (item) => item.name === mapName || item.serverValue === mapName
@@ -80,15 +82,19 @@ export class ServerManager {
     await Promise.race([initPromise, exitPromise]);
 
     const fridaScripts = [...(modScripts ?? [])];
-    let telemetryPort: number | undefined;
-    if (this.config.telemetryEnabled) {
-      const telemetryScript = 'patches/technical/telemetry/telemetry.js';
-      if (!fridaScripts.includes(telemetryScript)) {
-        fridaScripts.push(telemetryScript);
-      }
+    const scoreboardOn = enableScoreboardStats !== false;
+    if (scoreboardOn) {
       const scoreboardStatsScript = 'patches/technical/scoreboard_stats/scoreboard_stats.js';
       if (!fridaScripts.includes(scoreboardStatsScript)) {
         fridaScripts.push(scoreboardStatsScript);
+      }
+    }
+
+    let telemetryPort: number | undefined;
+    if (enableTelemetry) {
+      const telemetryScript = 'patches/technical/telemetry/telemetry.js';
+      if (!fridaScripts.includes(telemetryScript)) {
+        fridaScripts.push(telemetryScript);
       }
       telemetryPort = this.config.telemetryBasePort + port;
     }

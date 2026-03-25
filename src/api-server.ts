@@ -191,13 +191,17 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
+        const enableTelemetry = Boolean(body.enableTelemetry);
+        const enableScoreboardStats = body.enableScoreboardStats !== false;
         const session = await serverManager.startSession(
           mapName,
           undefined,
           undefined,
           scripts,
           mods,
-          modifiers
+          modifiers,
+          enableTelemetry,
+          enableScoreboardStats
         );
         sendJson(res, 200, {
           ok: true,
@@ -244,13 +248,17 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           sendJson(res, 400, { ok: false, error: `Unknown mods: ${unknown.join(', ')}` });
           return;
         }
+        const enableTelemetry = Boolean(body.enableTelemetry);
+        const enableScoreboardStats = body.enableScoreboardStats !== false;
         const session = await serverManager.startSession(
           mapName,
           params,
           'test',
           scripts,
           mods,
-          modifiers
+          modifiers,
+          enableTelemetry,
+          enableScoreboardStats
         );
         sendJson(res, 200, {
           ok: true,
