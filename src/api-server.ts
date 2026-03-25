@@ -9,7 +9,7 @@ import { listStableMods, listModCollections, resolveModScripts, parseMods } from
 import { loadCustomModifiers, parseCustomModifiers } from './reference/modifiers';
 import { loadRoleReferences } from './reference/roles';
 import { loadItemReferences } from './reference/items';
-import { getStatsReport, recordSessionFinalStats } from './stats/stats-service';
+import { getStatsReport, getSessionRecord, recordSessionFinalStats } from './stats/stats-service';
 import { PlayerRecord } from './stats/stats-types';
 
 export function createApiServer(config: ServerConfig, serverManager: ServerManager) {
@@ -291,7 +291,36 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
 
       if (req.method === 'GET' && url.pathname === '/stats') {
         const report = await getStatsReport();
-        sendJson(res, 200, { ok: true, ...report });
+        const activeSessions = serverManager.listSessions().map((session) => ({
+          statsSessionId: session.statsSessionId,
+          mapName: session.map.name,
+          port: session.port,
+          startedAt: session.startedAt.toISOString()
+        }));
+        sendJson(res, 200, { ok: true, ...report, activeSessions });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/stats/session') {
+        const sessionId = url.searchParams.get('id') ?? '';
+        if (!sessionId) {
+          sendJson(res, 400, { ok: false, error: 'id is required' });
+          return;
+        }
+        const record = await getSessionRecord(sessionId);
+        const active = serverManager.listSessions().find((s) => s.statsSessionId === sessionId);
+        sendJson(res, 200, {
+          ok: true,
+          record,
+          active: active
+            ? {
+                mapName: active.map.name,
+                port: active.port,
+                startedAt: active.startedAt.toISOString(),
+                statsSessionId: active.statsSessionId
+              }
+            : null
+        });
         return;
       }
 
