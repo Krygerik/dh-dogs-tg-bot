@@ -38,4 +38,6 @@ export interface StatsReport {
   topPlayersByWinrate: Array<{ name: string; wins: number; games: number; winrate: number }>;
   sessionsPerDay: Array<{ date: string; count: number }>;
   recentSessions: SessionRecord[];
+  /** Только для админ-клиента (заголовок X-App-Build: admin). Не показывать игрокам. */
+  eloLeaderboard?: Array<{ name: string; rating: number; games: number }>;
 }

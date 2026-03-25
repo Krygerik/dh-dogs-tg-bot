@@ -9,6 +9,7 @@ import {
 } from './stats-types';
 import { RunningSession } from '../types';
 import { STATS_ALL_SESSIONS } from '../config';
+import { computeEloLeaderboard } from './elo';
 
 export function createStatsSessionId(): string {
   return crypto.randomUUID();
@@ -89,8 +90,9 @@ export async function getSessionRecord(sessionId: string): Promise<SessionRecord
   return sessions.find((s) => s.sessionId === sessionId) ?? null;
 }
 
-export async function getStatsReport(): Promise<StatsReport> {
+export async function getStatsReport(options?: { includeElo?: boolean }): Promise<StatsReport> {
   const sessions = await statsStore.readAll();
+  const includeElo = options?.includeElo === true;
 
   const totalSessions = sessions.length;
   const totalPlaytimeSeconds = sessions.reduce((sum, s) => sum + s.durationSeconds, 0);
@@ -150,13 +152,19 @@ export async function getStatsReport(): Promise<StatsReport> {
 
   const recentSessions = sessions.slice(-10).reverse();
 
-  return {
+  const report: StatsReport = {
     totalSessions,
     totalPlaytimeSeconds,
     averageSessionSeconds,
     topPlayersByGames,
     topPlayersByWinrate,
     sessionsPerDay,
-    recentSessions,
+    recentSessions
   };
+
+  if (includeElo) {
+    report.eloLeaderboard = computeEloLeaderboard(sessions);
+  }
+
+  return report;
 }

@@ -290,7 +290,8 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
       }
 
       if (req.method === 'GET' && url.pathname === '/stats') {
-        const report = await getStatsReport();
+        const adminClient = req.headers['x-app-build'] === 'admin';
+        const report = await getStatsReport({ includeElo: adminClient });
         const activeSessions = serverManager.listSessions().map((session) => ({
           statsSessionId: session.statsSessionId,
           mapName: session.map.name,
