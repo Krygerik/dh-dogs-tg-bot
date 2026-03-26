@@ -11,7 +11,6 @@ import { loadRoleReferences } from './reference/roles';
 import { loadItemReferences } from './reference/items';
 import { getStatsReport, getSessionRecord, recordSessionFinalStats } from './stats/stats-service';
 import { PlayerRecord } from './stats/stats-types';
-
 export function createApiServer(config: ServerConfig, serverManager: ServerManager) {
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -193,6 +192,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
+        const enableEloBalancer = body.enableEloBalancer !== false;
         const session = await serverManager.startSession(
           mapName,
           undefined,
@@ -201,7 +201,8 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           mods,
           modifiers,
           enableTelemetry,
-          enableScoreboardStats
+          enableScoreboardStats,
+          enableEloBalancer
         );
         sendJson(res, 200, {
           ok: true,
@@ -250,6 +251,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
+        const enableEloBalancer = body.enableEloBalancer !== false;
         const session = await serverManager.startSession(
           mapName,
           params,
@@ -258,7 +260,8 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           mods,
           modifiers,
           enableTelemetry,
-          enableScoreboardStats
+          enableScoreboardStats,
+          enableEloBalancer
         );
         sendJson(res, 200, {
           ok: true,
@@ -335,6 +338,51 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           return;
         }
         await recordSessionFinalStats(sessionId, players, winningTeam);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/stats/elo-balance') {
+        await readJsonBody(req);
+        /** Пустышка: расчёт множителей по Elo отключён; Frida не меняет игру, только пайплайн. */
+        sendJson(res, 200, {
+          ok: true,
+          modifiers: {},
+          stub: true,
+          avgCrew: 0,
+          avgThrall: 0,
+          diff: 0,
+          stepsUsed: 0
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/session/balancer-meta') {
+        const body = await readJsonBody(req);
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+        const rawMods = body.balancerAppliedModifiers;
+        if (!sessionId) {
+          sendJson(res, 400, { ok: false, error: 'sessionId is required' });
+          return;
+        }
+        if (typeof rawMods !== 'object' || rawMods === null || Array.isArray(rawMods)) {
+          sendJson(res, 400, { ok: false, error: 'balancerAppliedModifiers must be an object' });
+          return;
+        }
+        const balancerAppliedModifiers: Record<string, number> = {};
+        for (const [k, v] of Object.entries(rawMods)) {
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            balancerAppliedModifiers[k] = v;
+          }
+        }
+        const applied = serverManager.applyBalancerMetadata(sessionId, {
+          modifiersFromBalancer: true,
+          balancerAppliedModifiers
+        });
+        if (!applied) {
+          sendJson(res, 404, { ok: false, error: 'Active session not found for sessionId' });
+          return;
+        }
         sendJson(res, 200, { ok: true });
         return;
       }

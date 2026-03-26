@@ -33,7 +33,12 @@ export async function recordSessionEnd(
 ): Promise<void> {
   // Сессии с нестандартными модификаторами не учитываются в статистике,
   // если не включён флаг STATS_ALL_SESSIONS (режим разработки).
-  if (!STATS_ALL_SESSIONS && hasNonDefaultModifiers(session.customModifiers)) {
+  // Рантайм-балансировщик по Elo помечает modifiersFromBalancer — такие сессии сохраняем.
+  if (
+    !STATS_ALL_SESSIONS &&
+    hasNonDefaultModifiers(session.customModifiers) &&
+    !session.modifiersFromBalancer
+  ) {
     pendingFinalStats.delete(statsSessionId);
     return;
   }
@@ -54,6 +59,11 @@ export async function recordSessionEnd(
     mapValue: session.map.serverValue,
     mods: session.mods,
     customModifiers: session.customModifiers,
+    modifiersFromBalancer: session.modifiersFromBalancer ?? false,
+    balancerAppliedModifiers:
+      session.balancerAppliedModifiers && Object.keys(session.balancerAppliedModifiers).length > 0
+        ? session.balancerAppliedModifiers
+        : undefined,
     startedAt: session.startedAt.toISOString(),
     endedAt: endedAt.toISOString(),
     durationSeconds,

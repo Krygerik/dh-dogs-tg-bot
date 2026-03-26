@@ -27,7 +27,8 @@ export class ServerManager {
     modIds?: string[],
     customModifiers?: Record<string, number>,
     enableTelemetry?: boolean,
-    enableScoreboardStats?: boolean
+    enableScoreboardStats?: boolean,
+    enableEloBalancer?: boolean
   ): Promise<GameSession> {
     let map = this.config.maps.find(
       (item) => item.name === mapName || item.serverValue === mapName
@@ -89,6 +90,13 @@ export class ServerManager {
         fridaScripts.push(scoreboardStatsScript);
       }
     }
+    const eloBalancerOn = enableEloBalancer !== false;
+    if (eloBalancerOn) {
+      const eloBalanceScript = 'patches/technical/elo_balance_modifiers/elo_balance_modifiers.js';
+      if (!fridaScripts.includes(eloBalanceScript)) {
+        fridaScripts.push(eloBalanceScript);
+      }
+    }
 
     let telemetryPort: number | undefined;
     if (enableTelemetry) {
@@ -121,6 +129,7 @@ export class ServerManager {
       logPath,
       mods: modIds ?? [],
       customModifiers: customModifiers ?? {},
+      eloBalancerEnabled: eloBalancerOn,
       telemetryPort,
       process: child,
       statsSessionId,
@@ -136,6 +145,20 @@ export class ServerManager {
     });
 
     return session;
+  }
+
+  applyBalancerMetadata(
+    statsSessionId: string,
+    data: { modifiersFromBalancer: boolean; balancerAppliedModifiers: Record<string, number> }
+  ): boolean {
+    for (const s of this.sessions.values()) {
+      if (s.statsSessionId === statsSessionId) {
+        s.modifiersFromBalancer = data.modifiersFromBalancer;
+        s.balancerAppliedModifiers = { ...data.balancerAppliedModifiers };
+        return true;
+      }
+    }
+    return false;
   }
 
   async stopSession(port: number): Promise<boolean> {

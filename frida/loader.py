@@ -113,6 +113,17 @@ class TelemetryBridge:
 telemetry_bridge = None
 current_session_id = None
 api_port = 8787
+elo_balance_script = None
+# recv() в Frida обрабатывает post() строго FIFO; параллельные HTTP ломают порядок пар send/recv.
+elo_balance_lock = threading.Lock()
+
+
+def _api_headers():
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("API_TOKEN", "").strip()
+    if token:
+        headers["X-API-Token"] = token
+    return headers
 
 
 def post_session_stats(session_id, data):
@@ -125,13 +136,62 @@ def post_session_stats(session_id, data):
         req = urllib.request.Request(
             f"http://127.0.0.1:{api_port}/session-stats",
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=_api_headers(),
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             print(f"[session_stats] posted to API: {resp.status}")
     except Exception as exc:
         print(f"[session_stats] failed to post to API: {exc}")
+
+
+def _normalize_elo_balance_post(data):
+    """Frida recv() должен всегда получать dict с полем ok (иначе скрипт видит {})."""
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "invalid API response", "modifiers": {}}
+    if "ok" not in data:
+        data = {**data, "ok": bool(data.get("modifiers"))}
+    return data
+
+
+def handle_elo_balance_request(payload):
+    global elo_balance_script
+    with elo_balance_lock:
+        try:
+            body = json.dumps({"players": payload.get("players", [])}).encode("utf-8")
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{api_port}/stats/elo-balance",
+                data=body,
+                headers=_api_headers(),
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                raw = resp.read().decode()
+                data = json.loads(raw) if raw.strip() else {}
+            if elo_balance_script:
+                elo_balance_script.post(_normalize_elo_balance_post(data))
+        except Exception as exc:
+            print(f"[elo_balance] API failed: {exc}")
+            if elo_balance_script:
+                elo_balance_script.post({"ok": False, "error": str(exc), "modifiers": {}})
+
+
+def post_balancer_meta(session_id, mods):
+    try:
+        body = json.dumps({
+            "sessionId": session_id,
+            "balancerAppliedModifiers": mods,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{api_port}/session/balancer-meta",
+            data=body,
+            headers=_api_headers(),
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            print(f"[balancer-meta] posted to API: {resp.status}")
+    except Exception as exc:
+        print(f"[balancer-meta] failed to post to API: {exc}")
 
 
 def on_message(msg, data):
@@ -154,6 +214,27 @@ def on_message(msg, data):
                 return
             if payload.get("type") == "scoreboard_stats_error":
                 print(f"[scoreboard_stats] error from script: {payload.get('error')}")
+                return
+            if payload.get("type") == "elo_balance_request":
+                threading.Thread(
+                    target=handle_elo_balance_request,
+                    args=(payload,),
+                    daemon=True,
+                ).start()
+                return
+            if payload.get("type") == "elo_balance_meta":
+                threading.Thread(
+                    target=post_balancer_meta,
+                    args=(payload.get("sessionId"), payload.get("balancerAppliedModifiers")),
+                    daemon=True,
+                ).start()
+                return
+            if payload.get("type") == "elo_balance_log":
+                line = f"[elo_balance] {payload.get('message', '')}"
+                try:
+                    print(line)
+                except UnicodeEncodeError:
+                    print(line.encode("ascii", "replace").decode("ascii"))
                 return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
@@ -219,7 +300,29 @@ def load_scripts_config(map_value, mods_json=None, mods_list=None):
 
 
 # Function to attach to the process and inject scripts
-def attach_to_process_and_inject_scripts(session, scripts):
+def _elo_balance_script_prefix(session_id):
+    lines = []
+    if session_id:
+        lines.append("globalThis.__DH_STATS_SESSION_ID = %s;\n" % json.dumps(session_id))
+    solo = os.environ.get("DH_ELO_BALANCE_SOLO_TEST", "").strip().lower()
+    if solo in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_BALANCE_SOLO_TEST = true;\n")
+    dbg = os.environ.get("DH_ELO_BALANCE_DEBUG", "").strip().lower()
+    if dbg in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_BALANCE_DEBUG = true;\n")
+    ingame = os.environ.get("DH_ELO_BALANCE_INGAME_LOG", "").strip().lower()
+    if ingame in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_BALANCE_INGAME_LOG = true;\n")
+    no_fb = os.environ.get("DH_ELO_BALANCE_DISABLE_FALLBACK", "").strip().lower()
+    if no_fb in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_BALANCE_DISABLE_FALLBACK = true;\n")
+    return "".join(lines)
+
+
+def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
+    global elo_balance_script
+    elo_balance_script = None
+    prefix = _elo_balance_script_prefix(session_id)
     loaded = []
     for script_path in scripts:
         resolved_path = resolve_script_path(script_path)
@@ -227,19 +330,22 @@ def attach_to_process_and_inject_scripts(session, scripts):
             print(f"Warning: script not found, skipping: {resolved_path}")
             continue
         with open(resolved_path, 'r', encoding="utf-8") as file:
-            script_code = file.read()
-            script = inject_script(session, script_code)
+            script_code = prefix + file.read()
+            script = inject_script(session, script_code, script_path)
             if script:
                 loaded.append((script_path, script))
     return loaded
 
 # Function to inject each script
-def inject_script(session, script_code):
+def inject_script(session, script_code, script_path=None):
+    global elo_balance_script
     try:
         script = session.create_script(script_code)
         script.on("message", on_message)
         script.load()  # Load and execute the script
         print("Successfully injected script.")
+        if script_path and "elo_balance_modifiers" in script_path.replace("\\", "/"):
+            elo_balance_script = script
         return script
     except Exception as e:
         print(f"Error injecting script: {e}")
@@ -342,7 +448,7 @@ if __name__ == "__main__":
         else:
             print("  (no scripts)")
 
-        loaded_scripts = attach_to_process_and_inject_scripts(session, scripts)
+        loaded_scripts = attach_to_process_and_inject_scripts(session, scripts, session_id)
 
         telemetry_script = None
         for script_path, script in loaded_scripts:

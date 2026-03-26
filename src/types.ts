@@ -63,6 +63,11 @@ export type GameSession = {
   logPath: string;
   mods: string[];
   customModifiers: Record<string, number>;
+  /** Включён ли Frida-мод elo_balance_modifiers. */
+  eloBalancerEnabled?: boolean;
+  /** После ответа API / применения в процессе. */
+  modifiersFromBalancer?: boolean;
+  balancerAppliedModifiers?: Record<string, number>;
   telemetryPort?: number;
   statsSessionId: string;
 };

@@ -17,6 +17,10 @@ export interface SessionRecord {
   mapValue: string;
   mods: string[];
   customModifiers: Record<string, number>;
+  /** Модификаторы, фактически применённые рантайм-балансировщиком (Frida). */
+  balancerAppliedModifiers?: Record<string, number>;
+  /** Сессия учитывает автобаланс по Elo (модификаторы не скрывают матч из статистики). */
+  modifiersFromBalancer?: boolean;
   startedAt: string;
   endedAt: string;
   durationSeconds: number;

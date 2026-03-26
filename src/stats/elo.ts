@@ -8,18 +8,15 @@ function expectedTeamScore(teamRating: number, opponentRating: number): number {
 }
 
 /**
- * Командный Elo: мирные vs маньяки, средний рейтинг команды до матча, обновление поровну внутри команды.
- * Учитываются только сессии с исходом humans_win / cannibals_win и хотя бы одним игроком в каждой команде.
+ * Текущие рейтинги после прохода по истории сессий (та же логика, что и у лидерборда Elo).
  */
-export function computeEloLeaderboard(
+export function computePlayerRatingsMap(
   sessions: SessionRecord[],
   options?: { initialRating?: number; k?: number }
-): Array<{ name: string; rating: number; games: number }> {
+): Map<string, number> {
   const initialRating = options?.initialRating ?? DEFAULT_INITIAL;
   const K = options?.k ?? DEFAULT_K;
   const ratings = new Map<string, number>();
-  const games = new Map<string, number>();
-
   const getR = (name: string) => ratings.get(name) ?? initialRating;
 
   const sorted = [...sessions].sort(
@@ -45,12 +42,40 @@ export function computeEloLeaderboard(
       const oldR = getR(p.name);
       const delta = (K * (sCrew - eCrew)) / crew.length;
       ratings.set(p.name, oldR + delta);
-      games.set(p.name, (games.get(p.name) ?? 0) + 1);
     }
     for (const p of thralls) {
       const oldR = getR(p.name);
       const delta = (K * (sThrall - eThrall)) / thralls.length;
       ratings.set(p.name, oldR + delta);
+    }
+  }
+
+  return ratings;
+}
+
+/**
+ * Командный Elo: мирные vs маньяки, средний рейтинг команды до матча, обновление поровну внутри команды.
+ * Учитываются только сессии с исходом humans_win / cannibals_win и хотя бы одним игроком в каждой команде.
+ */
+export function computeEloLeaderboard(
+  sessions: SessionRecord[],
+  options?: { initialRating?: number; k?: number }
+): Array<{ name: string; rating: number; games: number }> {
+  const ratings = computePlayerRatingsMap(sessions, options);
+  const games = new Map<string, number>();
+
+  const sorted = [...sessions].sort(
+    (a, b) => new Date(a.endedAt).getTime() - new Date(b.endedAt).getTime()
+  );
+  for (const s of sorted) {
+    if (s.outcome !== 'humans_win' && s.outcome !== 'cannibals_win') continue;
+    const crew = s.players.filter((p) => !p.traitor);
+    const thralls = s.players.filter((p) => p.traitor);
+    if (crew.length === 0 || thralls.length === 0) continue;
+    for (const p of crew) {
+      games.set(p.name, (games.get(p.name) ?? 0) + 1);
+    }
+    for (const p of thralls) {
       games.set(p.name, (games.get(p.name) ?? 0) + 1);
     }
   }
