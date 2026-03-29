@@ -11,6 +11,13 @@ export const API_TOKEN = (process.env.API_TOKEN ?? "").trim();
 // Если true — статистика собирается со всех сессий (в т.ч. с изменёнными модификаторами).
 // Только для разработки. В продакшне не устанавливать.
 export const STATS_ALL_SESSIONS = isTruthy(process.env.STATS_ALL_SESSIONS);
+
+/**
+ * Проверять в рантайме (после dotenv), не константой при импорте модуля — иначе APP_ENV из .env ещё не загружен.
+ */
+export function isAppEnvDev(): boolean {
+  return (process.env.APP_ENV ?? "").toLowerCase() === "dev";
+}
 export const TEST_PARAMS_SOLO = "maxplayers=1?thralls=1";
 export const TEST_PARAMS_DUO = "maxplayers=2?thralls=2";
 

@@ -236,6 +236,14 @@ def on_message(msg, data):
                 except UnicodeEncodeError:
                     print(line.encode("ascii", "replace").decode("ascii"))
                 return
+            ptype = payload.get("type")
+            if isinstance(ptype, str) and ptype.startswith("predator_dmg"):
+                line = f"[{ptype}] {payload.get('message', '')}"
+                try:
+                    print(line)
+                except UnicodeEncodeError:
+                    print(line.encode("ascii", "replace").decode("ascii"))
+                return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
         return

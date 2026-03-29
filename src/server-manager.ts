@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { ServerConfig, MapConfig, GameSession, RunningSession } from './types';
-import { resolveFridaPath } from './config';
+import { resolveFridaPath, isAppEnvDev } from './config';
 import { buildSessionParams, buildMapArg } from './utils/parse';
 import { killProcessTree, wrapCommand, waitForSignature, waitForSignatureWithHandlers } from './utils/process';
 import { attachRealtimeLogging } from './utils/logging';
@@ -105,6 +105,18 @@ export class ServerManager {
         fridaScripts.push(telemetryScript);
       }
       telemetryPort = this.config.telemetryBasePort + port;
+    }
+
+    if (isAppEnvDev()) {
+      const devScripts: string[] = [
+        // 'patches/dev/predator_damage_multiplier.js',
+      ];
+      for (const devScript of devScripts) {
+        if (!fridaScripts.includes(devScript)) {
+          fridaScripts.push(devScript);
+          console.log('[dev] Frida script list: +' + devScript);
+        }
+      }
     }
 
     const statsSessionId = createStatsSessionId();
