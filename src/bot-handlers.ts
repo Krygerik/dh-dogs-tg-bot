@@ -438,7 +438,8 @@ export function registerBotHandlers(
         for (const p of explorers) {
           const role = p.roleName ? escapeMarkdown(p.roleName) : 'неизв.';
           const dead = p.isDead ? ' — погиб' : '';
-          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}`);
+          const dmg = (p.damageToEnemy ?? 0) > 0 ? ` — ${p.damageToEnemy} урона` : '';
+          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}${dmg}`);
         }
       } else {
         lines.push(`  (нет)`);
@@ -449,7 +450,8 @@ export function registerBotHandlers(
         for (const p of traitors) {
           const role = p.roleName ? escapeMarkdown(p.roleName) : 'неизв.';
           const dead = p.isDead ? ' — погиб' : '';
-          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}`);
+          const dmg = (p.damageToEnemy ?? 0) > 0 ? ` — ${p.damageToEnemy} урона` : '';
+          lines.push(`  ${escapeMarkdown(p.name)} [${role}]${dead}${dmg}`);
         }
       } else {
         lines.push(`  (нет)`);
@@ -479,6 +481,10 @@ export function registerBotHandlers(
         .map((p, i) => `  ${i + 1}. ${escapeMarkdown(p.name)} — ${p.winrate}% (${p.wins}/${p.games})`)
         .join('\n');
 
+      const topByDamage = report.topPlayersByDamage.slice(0, 5)
+        .map((p, i) => `  ${i + 1}. ${escapeMarkdown(p.name)} — ${p.totalDamage} урона (${p.avgDamage}/игру, ${p.games} игр)`)
+        .join('\n');
+
       const recentLines = report.recentSessions.slice(0, 5)
         .map((s) => {
           const mins = Math.round(s.durationSeconds / 60);
@@ -499,6 +505,9 @@ export function registerBotHandlers(
         ``,
         `*Топ игроков по винрейту* (мин. 3 игры):`,
         topByWinrate || '  (нет данных)',
+        ``,
+        `*Топ игроков по урону врагам* (мин. 3 игры):`,
+        topByDamage || '  (нет данных)',
         ``,
         `*Последние 5 сессий:*`,
         recentLines || '  (нет данных)',

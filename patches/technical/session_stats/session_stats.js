@@ -33,6 +33,7 @@ const OFFSETS = {
   PlayerStateSelectedRole: 0x590,
   RoleNameFString: 0x48,
   WinningTeam: 0x51c,
+  MatchStats: 0x330,          // TArray<FPlayerMatchStat>
 };
 
 // Native functions (адреса из telemetry.js)
@@ -55,6 +56,30 @@ function safeReadPointer(addr) {
     return p.isNull() ? null : p;
   } catch (_) {
     return null;
+  }
+}
+
+// FPlayerMatchStat: { uint8 Stat, pad[3], int32 Count, float ScoreTotal } = 12 bytes
+const PMS_DAMAGE_ENEMY = 35;
+const MATCH_STAT_SIZE = 0x0c;
+
+function readDamageToEnemy(playerStatePtr) {
+  try {
+    const matchStatsAddr = playerStatePtr.add(OFFSETS.MatchStats);
+    const dataPtr = safeReadPointer(matchStatsAddr);
+    if (!dataPtr) return 0;
+    const count = matchStatsAddr.add(8).readS32();
+    if (count <= 0 || count > 256) return 0;
+    for (let i = 0; i < count; i++) {
+      const entryAddr = dataPtr.add(i * MATCH_STAT_SIZE);
+      const statType = entryAddr.readU8();
+      if (statType === PMS_DAMAGE_ENEMY) {
+        return Math.round(entryAddr.add(0x08).readFloat());
+      }
+    }
+    return 0;
+  } catch (_) {
+    return 0;
   }
 }
 
@@ -116,7 +141,8 @@ function collectFinalSnapshot() {
             roleName = null;
           }
 
-          players.push({ name, roleName, traitor, isDead });
+          const damageToEnemy = readDamageToEnemy(playerStatePtr);
+          players.push({ name, roleName, traitor, isDead, damageToEnemy });
         } catch (_) {
           // skip this player
         }
