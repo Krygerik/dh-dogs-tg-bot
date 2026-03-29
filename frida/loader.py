@@ -112,7 +112,18 @@ class TelemetryBridge:
 
 telemetry_bridge = None
 current_session_id = None
-api_port = 8787
+
+
+def _resolve_api_port():
+    """Совпадает с портом HTTP API бота (см. src/config.ts API_PORT). Переопределение: DH_API_PORT или API_PORT."""
+    for key in ("DH_API_PORT", "API_PORT"):
+        v = os.environ.get(key, "").strip()
+        if v.isdigit():
+            return int(v)
+    return 8787
+
+
+api_port = _resolve_api_port()
 elo_balance_script = None
 # recv() в Frida обрабатывает post() строго FIFO; параллельные HTTP ломают порядок пар send/recv.
 elo_balance_lock = threading.Lock()
@@ -154,6 +165,13 @@ def _normalize_elo_balance_post(data):
     return data
 
 
+def _wrap_elo_balance_reply(data):
+    """Тип сообщения для recv('elo_balance_reply') в Frida 16+ (recv() без аргументов больше нет)."""
+    d = dict(_normalize_elo_balance_post(data))
+    d["type"] = "elo_balance_reply"
+    return d
+
+
 def handle_elo_balance_request(payload):
     global elo_balance_script
     with elo_balance_lock:
@@ -169,11 +187,15 @@ def handle_elo_balance_request(payload):
                 raw = resp.read().decode()
                 data = json.loads(raw) if raw.strip() else {}
             if elo_balance_script:
-                elo_balance_script.post(_normalize_elo_balance_post(data))
+                elo_balance_script.post(_wrap_elo_balance_reply(data))
         except Exception as exc:
             print(f"[elo_balance] API failed: {exc}")
             if elo_balance_script:
-                elo_balance_script.post({"ok": False, "error": str(exc), "modifiers": {}})
+                elo_balance_script.post(
+                    _wrap_elo_balance_reply(
+                        {"ok": False, "error": str(exc), "modifiers": {}}
+                    )
+                )
 
 
 def post_balancer_meta(session_id, mods):

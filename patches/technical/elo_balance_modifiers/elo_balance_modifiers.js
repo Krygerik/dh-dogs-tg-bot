@@ -326,9 +326,13 @@ if (base === null) {
 
       send({ type: 'elo_balance_request', players });
 
+      /** Frida 16+: нет блокирующего recv(); только recv(type, cb) + operation.wait() (см. loader.py type). */
       let api;
       try {
-        api = recv();
+        const op = recv('elo_balance_reply', function (message) {
+          api = message;
+        });
+        op.wait();
       } catch (e) {
         logLine('recv failed: ' + e);
         return;
