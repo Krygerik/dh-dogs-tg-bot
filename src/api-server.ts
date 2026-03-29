@@ -11,6 +11,12 @@ import { loadRoleReferences } from './reference/roles';
 import { loadItemReferences } from './reference/items';
 import { getStatsReport, getSessionRecord, recordSessionFinalStats } from './stats/stats-service';
 import { PlayerRecord } from './stats/stats-types';
+import { statsStore } from './stats/stats-store';
+import { computePlayerRatingsMap } from './stats/elo';
+import {
+  computeEloBalanceModifiers,
+  EloBalanceInputPlayer
+} from './stats/balance-modifiers';
 export function createApiServer(config: ServerConfig, serverManager: ServerManager) {
   const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -192,7 +198,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
-        const enableEloBalancer = body.enableEloBalancer !== false;
+        const enableEloBalancer = body.enableEloBalancer === true;
         const session = await serverManager.startSession(
           mapName,
           undefined,
@@ -251,7 +257,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
-        const enableEloBalancer = body.enableEloBalancer !== false;
+        const enableEloBalancer = body.enableEloBalancer === true;
         const session = await serverManager.startSession(
           mapName,
           params,
@@ -343,16 +349,46 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
       }
 
       if (req.method === 'POST' && url.pathname === '/stats/elo-balance') {
-        await readJsonBody(req);
-        /** Пустышка: расчёт множителей по Elo отключён; Frida не меняет игру, только пайплайн. */
+        const body = await readJsonBody(req);
+        const rawPlayers =
+          body && typeof body === 'object' && body !== null && 'players' in body
+            ? (body as { players?: unknown }).players
+            : undefined;
+        const players: EloBalanceInputPlayer[] = [];
+        if (Array.isArray(rawPlayers)) {
+          for (const p of rawPlayers) {
+            if (
+              p &&
+              typeof p === 'object' &&
+              typeof (p as { name?: unknown }).name === 'string' &&
+              String((p as { name: string }).name).trim()
+            ) {
+              players.push({
+                name: String((p as { name: string }).name).trim(),
+                traitor: Boolean((p as { traitor?: unknown }).traitor)
+              });
+            }
+          }
+        }
+        const sessions = await statsStore.readAll();
+        const ratingByName = computePlayerRatingsMap(sessions);
+        const { definitions } = loadCustomModifiers();
+        const {
+          modifiers,
+          avgCrew,
+          avgThrall,
+          diff,
+          stepsUsed,
+          strengthRatio
+        } = computeEloBalanceModifiers(players, ratingByName, definitions);
         sendJson(res, 200, {
           ok: true,
-          modifiers: {},
-          stub: true,
-          avgCrew: 0,
-          avgThrall: 0,
-          diff: 0,
-          stepsUsed: 0
+          modifiers,
+          avgCrew,
+          avgThrall,
+          diff,
+          stepsUsed,
+          strengthRatio
         });
         return;
       }

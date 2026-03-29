@@ -90,7 +90,7 @@ export class ServerManager {
         fridaScripts.push(scoreboardStatsScript);
       }
     }
-    const eloBalancerOn = enableEloBalancer !== false;
+    const eloBalancerOn = enableEloBalancer === true;
     if (eloBalancerOn) {
       const eloBalanceScript = 'patches/technical/elo_balance_modifiers/elo_balance_modifiers.js';
       if (!fridaScripts.includes(eloBalanceScript)) {

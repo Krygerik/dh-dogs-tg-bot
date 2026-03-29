@@ -338,7 +338,18 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
             print(f"Warning: script not found, skipping: {resolved_path}")
             continue
         with open(resolved_path, 'r', encoding="utf-8") as file:
-            script_code = prefix + file.read()
+            main_code = file.read()
+            norm = script_path.replace("\\", "/")
+            if norm.endswith("elo_balance_modifiers/elo_balance_modifiers.js"):
+                lib_path = resolve_script_path(
+                    "patches/technical/elo_balance_modifiers/predator_damage_lib.js"
+                )
+                if os.path.exists(lib_path):
+                    with open(lib_path, "r", encoding="utf-8") as lf:
+                        main_code = lf.read() + "\n" + main_code
+                else:
+                    print(f"Warning: predator_damage_lib.js not found: {lib_path}")
+            script_code = prefix + main_code
             script = inject_script(session, script_code, script_path)
             if script:
                 loaded.append((script_path, script))

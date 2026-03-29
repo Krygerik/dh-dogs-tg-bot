@@ -1,16 +1,10 @@
 'use strict';
 
 /**
- * Elo runtime balancer (stub): хук ADH_GameMode::OnPokerRoundEnded и fallback по ADH_GameState::Tick,
- * запрос множителей у API /stats/elo-balance через Frida send/recv. В память процесса и «внутриигровой
- * конфиг» ничего не пишем — только логи и доставка modifiers в мету сессии (elo_balance_meta).
- *
- * Соло-тест: globalThis.__DH_ELO_BALANCE_SOLO_TEST = true — при пустом ответе API подставляется
- * синтетический пресет (для проверки пайплайна), без применения в игре.
- * DH_ELO_BALANCE_DEBUG=1: подробные логи.
- *
- * OnPokerRoundEnded часто не вызывается (соло и т.д.) — fallback: MatchStartTime>0 на GameState.
- * Дубликат загрузки скрипта отсекается globalThis.__DH_ELO_BALANCE_INSTALLED.
+ * Elo-баланс: OnPokerRoundEnded + fallback Tick → API /stats/elo-balance → predatordamage → __DH_PREDATOR_DAMAGE_MULT.
+ * Уведомление всем: ReceiveThrallMessage (0xEE7810) + GetPlayerController / GetOwningController;
+ *   обход PlayerArray, SetPlayerRole (0xE4F390), ADH_HumanCharacter::AddStartingInventory (0xD46F10).
+ * Дубликат: globalThis.__DH_ELO_BALANCE_INSTALLED.
  */
 
 const MODULE_NAME = 'DreadHungerServer-Win64-Shipping.exe';
@@ -22,7 +16,7 @@ if (base === null) {
 
 (function eloBalanceInstall() {
   if (globalThis.__DH_ELO_BALANCE_INSTALLED) {
-    console.log('[elo_balance] duplicate script load skipped (singleton)');
+    // console.log('[elo_balance] duplicate script load skipped (singleton)');
     return;
   }
   globalThis.__DH_ELO_BALANCE_INSTALLED = true;
@@ -34,15 +28,25 @@ if (base === null) {
     PlayerArray: 0x238,
     PlayerName: 0x300,
     PlayerStateIsThrall: 0x572,
+    PlayerId: 0x224,
     MatchStartTime: 0x518,
   };
 
   const RVA_ON_POKER_ROUND_ENDED = 0xeb7590;
   const RVA_GAME_STATE_TICK = 0xdad420;
+  const RVA_PC_RECEIVE_THRALL_MESSAGE = 0xee7810;
+  const RVA_UGAMEPLAYSTATICS_GET_PLAYER_CONTROLLER = 0x25630d0;
+  const RVA_PLAYERSTATE_SET_PLAYER_ROLE = 0xe4f390;
+  const RVA_ADD_STARTING_INVENTORY = 0xd46f10;
+  const RVA_PLAYERSTATE_GET_OWNING_CONTROLLER = 0xe39820;
+  const RVA_FNAME_FNAME = 0x1158f20;
+  const RVA_FTEXT_FROM_NAME = 0x1096370;
+
+  const OFF_HUMAN_CHARACTER_PLAYER_STATE = 0x240;
 
   const STATS_SESSION_ID = globalThis.__DH_STATS_SESSION_ID || '';
   const SOLO_TEST = globalThis.__DH_ELO_BALANCE_SOLO_TEST === true;
-  const DEBUG = globalThis.__DH_ELO_BALANCE_DEBUG === true;
+  // const DEBUG = globalThis.__DH_ELO_BALANCE_DEBUG === true;
   const DISABLE_FALLBACK = globalThis.__DH_ELO_BALANCE_DISABLE_FALLBACK === true;
 
   const DAYS_BEFORE_BLIZZARD_MIN = 2;
@@ -61,15 +65,34 @@ if (base === null) {
 
   let balanceApplied = false;
   let fallbackTickCounter = 0;
+  const balanceNoticeSentForPlayerState = new Set();
 
-  function logInfo(msg) {
-    const line = String(msg);
-    console.log('[elo_balance] ' + line);
+  const nativeGetPlayerController = new NativeFunction(
+    base.add(RVA_UGAMEPLAYSTATICS_GET_PLAYER_CONTROLLER),
+    'pointer',
+    ['pointer', 'int32'],
+    'win64'
+  );
+  const nativeReceiveThrallMessage = new NativeFunction(
+    base.add(RVA_PC_RECEIVE_THRALL_MESSAGE),
+    'void',
+    ['pointer', 'pointer', 'pointer'],
+    'win64'
+  );
+  const nativeGetOwningController = new NativeFunction(
+    base.add(RVA_PLAYERSTATE_GET_OWNING_CONTROLLER),
+    'pointer',
+    ['pointer'],
+    'win64'
+  );
+
+  function logLine(msg) {
     try {
-      send({ type: 'elo_balance_log', message: line });
+      send({ type: 'elo_balance_log', message: String(msg) });
     } catch (_) {}
   }
 
+  /*
   function logDebug(msg) {
     if (!DEBUG && !SOLO_TEST) return;
     const line = String(msg);
@@ -78,11 +101,7 @@ if (base === null) {
       send({ type: 'elo_balance_log', message: '[dbg] ' + line });
     } catch (_) {}
   }
-
-  function logPhase(phase, detail) {
-    const line = '[phase:' + phase + '] ' + (detail !== undefined ? String(detail) : '');
-    logInfo(line);
-  }
+  */
 
   function safeReadPointer(addr) {
     try {
@@ -140,16 +159,115 @@ if (base === null) {
     return players;
   }
 
-  /** Заглушка: API вернул modifiers — в игру не применяем. */
+  function formatMultDisplay(m) {
+    const v = Number(m);
+    if (!Number.isFinite(v)) return '1';
+    const r = Math.round(v * 100) / 100;
+    if (Math.abs(r - Math.round(r)) < 1e-6) return String(Math.round(r));
+    return r.toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  function buildFTextFromMessageLine(line) {
+    const FName_FName = new NativeFunction(base.add(RVA_FNAME_FNAME), 'void', ['pointer', 'pointer', 'int8'], 'win64');
+    const FText_FromName = new NativeFunction(base.add(RVA_FTEXT_FROM_NAME), 'pointer', ['pointer', 'pointer'], 'win64');
+    const FName_Buffer = Memory.alloc(8);
+    const Buffer = Memory.alloc((line.length + 4) * 2);
+    Buffer.writeUtf16String('   ' + line);
+    FName_FName(FName_Buffer, Buffer, 1);
+    const FText_Buffer = Memory.alloc(24);
+    FText_FromName(FText_Buffer, FName_Buffer);
+    return FText_Buffer;
+  }
+
+  /** Как announcement_win64.js: PC + ReceiveThrallMessage(FText, Sound=null). */
+  function sendThrallMessageToPlayerController(playerControllerPtr, fTextPtr) {
+    if (!playerControllerPtr || playerControllerPtr.isNull()) return;
+    try {
+      nativeReceiveThrallMessage(playerControllerPtr, fTextPtr, ptr(0));
+    } catch (_e) {}
+  }
+
+  /** Каждому игроку с валидным PC (как announcement_win64.js на SetPlayerRole). */
+  function trySendPredatorNoticeToPlayerState(playerStatePtr) {
+    const pending = globalThis.__DH_ELO_THRALL_NOTICE_TEXT;
+    if (!pending || typeof pending !== 'string') return;
+    try {
+      if (!playerStatePtr || playerStatePtr.isNull()) return;
+      const k = playerStatePtr.toString();
+      if (balanceNoticeSentForPlayerState.has(k)) return;
+      let pid = 0;
+      try {
+        pid = playerStatePtr.add(OFF.PlayerId).readU8();
+      } catch (_e) {
+        return;
+      }
+      const pc = nativeGetPlayerController(playerStatePtr, pid | 0);
+      if (!pc || pc.isNull()) return;
+      const ft = buildFTextFromMessageLine(pending);
+      sendThrallMessageToPlayerController(pc, ft);
+      balanceNoticeSentForPlayerState.add(k);
+    } catch (_e) {}
+  }
+
+  /**
+   * Этап как quest_system / get_player_coord: HumanCharacter + PlayerState@0x240 + GetOwningController → PC.
+   * Дубли с trySendPredatorNoticeToPlayerState отсекаются по balanceNoticeSentForPlayerState.
+   */
+  function trySendPredatorNoticeFromHumanCharacter(humanCharPtr) {
+    const pending = globalThis.__DH_ELO_THRALL_NOTICE_TEXT;
+    if (!pending || typeof pending !== 'string') return;
+    try {
+      if (!humanCharPtr || humanCharPtr.isNull()) return;
+      const ps = safeReadPointer(humanCharPtr.add(OFF_HUMAN_CHARACTER_PLAYER_STATE));
+      if (!ps) return;
+      const k = ps.toString();
+      if (balanceNoticeSentForPlayerState.has(k)) return;
+      const pc = nativeGetOwningController(ps);
+      if (!pc || pc.isNull()) return;
+      const ft = buildFTextFromMessageLine(pending);
+      sendThrallMessageToPlayerController(pc, ft);
+      balanceNoticeSentForPlayerState.add(k);
+    } catch (_e) {}
+  }
+
+  function broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr) {
+    try {
+      const playerArray = gameStatePtr.add(OFF.PlayerArray);
+      const arrayData = safeReadPointer(playerArray);
+      const playerCount = playerArray.add(8).readU32();
+      if (!arrayData || playerCount <= 0 || playerCount >= 64) return;
+      for (let i = 0; i < playerCount; i += 1) {
+        const ps = safeReadPointer(arrayData.add(i * 8));
+        if (!ps) continue;
+        trySendPredatorNoticeToPlayerState(ps);
+      }
+    } catch (_e) {}
+  }
+
+  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, mult) {
+    const disp = formatMultDisplay(mult);
+    const line = 'В данной игре урон от хищников был изменен на ' + disp + 'x.';
+    globalThis.__DH_ELO_THRALL_NOTICE_TEXT = line;
+    broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr);
+  }
+
+  function applyPredatorDamageMultiplierFromModifiers(modifiers) {
+    const raw = modifiers && typeof modifiers.predatordamage === 'number' ? modifiers.predatordamage : 1;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) {
+      globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
+    } else {
+      globalThis.__DH_PREDATOR_DAMAGE_MULT = v;
+    }
+  }
+
   function applyModifiersStub(modifiers) {
-    logPhase('apply_stub', 'no in-game writes; modifiers=' + JSON.stringify(modifiers || {}));
+    applyPredatorDamageMultiplierFromModifiers(modifiers || {});
   }
 
   function mergeSoloSynthetic(modifiers) {
     const m = modifiers && typeof modifiers === 'object' ? { ...modifiers } : {};
     Object.assign(m, SOLO_SYNTHETIC_PRESET);
-    logPhase('solo_merge', 'SOLO_TEST preset ' + JSON.stringify(SOLO_SYNTHETIC_PRESET));
-    logInfo('SOLO_TEST: merged modifiers=' + JSON.stringify(m));
     return m;
   }
 
@@ -175,20 +293,12 @@ if (base === null) {
     if (players.length < 1) return;
 
     globalThis.__DH_ELO_FALLBACK_ARMED = true;
-    logPhase(
-      'fallback',
-      'Tick: MatchStartTime=' +
-        mst +
-        ' players=' +
-        players.length +
-        ' (OnPokerRoundEnded did not fire - scheduling balance)',
-    );
     const gmCopy = gm;
     setTimeout(() => {
       try {
         runBalanceForGameMode(gmCopy, 'fallback_MatchStartTime');
       } catch (e) {
-        logInfo('fallback runBalance: ' + e);
+        logLine('fallback runBalance: ' + e);
       } finally {
         if (!balanceApplied) globalThis.__DH_ELO_FALLBACK_ARMED = false;
       }
@@ -197,58 +307,40 @@ if (base === null) {
 
   function runBalanceForGameMode(gameModePtr, trigger) {
     if (globalThis.__DH_ELO_BALANCE_DONE_GLOBAL === true) {
-      logPhase('skip', 'balance already applied (global)');
       return;
     }
-    const trig = trigger || 'OnPokerRoundEnded';
     if (balanceApplied) {
-      logPhase('skip', 'balance already applied');
-      logDebug('skip: balance already applied');
       return;
     }
     if (globalThis.__DH_ELO_BALANCE_RUNNING) {
-      logPhase('skip', 'balance already running (concurrent)');
       return;
     }
     globalThis.__DH_ELO_BALANCE_RUNNING = true;
     try {
-      logPhase('hook', trig + ' gm=' + gameModePtr + ' SOLO_TEST=' + SOLO_TEST);
       const gameStatePtr = getGameStateFromGameMode(gameModePtr);
       if (!gameStatePtr) {
-        logPhase('abort', 'GameState is null');
         return;
       }
-      logPhase('state', 'GameState=' + gameStatePtr);
-      logDebug('GameState=' + gameStatePtr);
 
       const players = collectPlayers(gameStatePtr);
-      logPhase('roster', players.length + ' player(s): ' + JSON.stringify(players));
 
       send({ type: 'elo_balance_request', players });
-      logPhase('api', 'sent elo_balance_request, blocking recv()...');
 
       let api;
       try {
         api = recv();
       } catch (e) {
-        logPhase('recv', 'FAILED: ' + e);
+        logLine('recv failed: ' + e);
         return;
       }
-
-      logPhase('recv', 'returned, payload=' + JSON.stringify(api));
-      logDebug('API raw: ' + JSON.stringify(api));
 
       let modifiers = null;
       if (api && api.ok && api.modifiers && typeof api.modifiers === 'object') {
         modifiers = { ...api.modifiers };
-        logPhase('api_ok', JSON.stringify(modifiers));
       } else {
-        logPhase('api_err', String(JSON.stringify(api)));
         if (!SOLO_TEST) {
-          logPhase('abort', 'API fail and SOLO_TEST off');
           return;
         }
-        logPhase('solo', 'SOLO_TEST: use empty modifiers and synth');
         modifiers = {};
       }
 
@@ -256,11 +348,17 @@ if (base === null) {
         modifiers = mergeSoloSynthetic(modifiers);
       }
 
-      logPhase('apply', 'keys=' + Object.keys(modifiers).join(','));
       applyModifiersStub(modifiers);
+      setPredatorThrallNoticeAndTryDeliver(gameStatePtr, globalThis.__DH_PREDATOR_DAMAGE_MULT);
+      logLine(
+        'predatordamage=' +
+          formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) +
+          ' trigger=' +
+          (trigger || 'OnPokerRoundEnded')
+      );
+
       balanceApplied = true;
       globalThis.__DH_ELO_BALANCE_DONE_GLOBAL = true;
-      logPhase('apply_done', 'balanceApplied=true (stub)');
 
       if (STATS_SESSION_ID) {
         send({
@@ -268,15 +366,33 @@ if (base === null) {
           sessionId: STATS_SESSION_ID,
           balancerAppliedModifiers: modifiers,
         });
-        logPhase('meta', 'sent elo_balance_meta sessionId=' + STATS_SESSION_ID);
-      } else {
-        logPhase('meta', 'no STATS_SESSION_ID, skip balancer-meta');
-        logDebug('no STATS_SESSION_ID, skip balancer-meta');
       }
     } finally {
       globalThis.__DH_ELO_BALANCE_RUNNING = false;
     }
   }
+
+  Interceptor.attach(base.add(RVA_PLAYERSTATE_SET_PLAYER_ROLE), {
+    onEnter(args) {
+      this._psRole = args[0];
+    },
+    onLeave(_retval) {
+      try {
+        trySendPredatorNoticeToPlayerState(this._psRole);
+      } catch (_e) {}
+    },
+  });
+
+  Interceptor.attach(base.add(RVA_ADD_STARTING_INVENTORY), {
+    onEnter(args) {
+      this._humanAddInv = args[0];
+    },
+    onLeave(_retval) {
+      try {
+        trySendPredatorNoticeFromHumanCharacter(this._humanAddInv);
+      } catch (_e) {}
+    },
+  });
 
   Interceptor.attach(base.add(RVA_ON_POKER_ROUND_ENDED), {
     onEnter(args) {
@@ -288,7 +404,7 @@ if (base === null) {
         try {
           runBalanceForGameMode(gm, 'OnPokerRoundEnded');
         } catch (e) {
-          logInfo('runBalanceForGameMode: ' + e);
+          logLine('runBalanceForGameMode: ' + e);
         }
       }, 0);
     },
@@ -299,22 +415,13 @@ if (base === null) {
       try {
         maybeScheduleBalanceFallback();
       } catch (e) {
-        logInfo('GameState Tick fallback: ' + e);
+        logLine('GameState Tick fallback: ' + e);
       }
     },
   });
-
-  logPhase(
-    'init',
-    'stub balancer OnPokerRoundEnded @ ' +
-      base.add(RVA_ON_POKER_ROUND_ENDED) +
-      ' + fallback Tick @ ' +
-      base.add(RVA_GAME_STATE_TICK) +
-      ' SOLO_TEST=' +
-      SOLO_TEST +
-      ' DEBUG=' +
-      DEBUG +
-      ' DISABLE_FALLBACK=' +
-      DISABLE_FALLBACK,
-  );
 })();
+
+globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
+if (typeof installPredatorDamageHooks === 'function') {
+  installPredatorDamageHooks(base);
+}

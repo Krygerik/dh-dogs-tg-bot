@@ -14,21 +14,15 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-function roundToStep(value: number, step: number): number {
-  if (step <= 0) return value;
-  const k = Math.round(value / step);
-  return k * step;
-}
-
 export type EloBalanceInputPlayer = {
   name: string;
   traitor: boolean;
 };
 
 /**
- * По средним Elo команд и разнице сил выставляет множители (база = default из справочника).
- * Сильнее мирные — ужесточаем среду (множители вверх по ряду).
- * Сильнее предатели — смягчаем (множители вниз).
+ * Единственный применимый в игре рантайн-множитель — predatordamage (Frida).
+ * Формула: strengthRatio = avgCrewElo / avgThrallElo, predatordamage = strengthRatio² (кламп по справочнику).
+ * Сильнее мирные → больше урон хищников; сильнее предатели → меньше.
  */
 export function computeEloBalanceModifiers(
   players: EloBalanceInputPlayer[],
@@ -41,6 +35,7 @@ export function computeEloBalanceModifiers(
   avgThrall: number;
   diff: number;
   stepsUsed: number;
+  strengthRatio: number;
 } {
   const initial = options?.initialRating ?? 1500;
   const defByKey = new Map(definitions.map((d) => [d.key, d]));
@@ -63,24 +58,18 @@ export function computeEloBalanceModifiers(
     if (def) modifiers[key] = def.default;
   }
 
-  if (crew.length === 0 || thralls.length === 0 || Math.abs(diff) < 1e-6) {
-    return { modifiers, avgCrew, avgThrall, diff, stepsUsed: 0 };
+  let strengthRatio = 1;
+
+  if (crew.length === 0 || thralls.length === 0) {
+    return { modifiers, avgCrew, avgThrall, diff, stepsUsed: 0, strengthRatio };
   }
 
-  const magnitude = Math.min(4, Math.floor(Math.abs(diff) / 40));
-  const stepsUsed = magnitude;
-  const harderForCrew = diff > 0;
-
-  for (let i = 0; i < stepsUsed; i += 1) {
-    const key = BALANCE_MODIFIER_PRIORITY[i];
-    const def = defByKey.get(key);
-    if (!def) continue;
-    const delta = harderForCrew ? def.step : -def.step;
-    let next = modifiers[key] + delta;
-    next = roundToStep(next, def.step);
-    next = clamp(next, def.min, def.max);
-    modifiers[key] = next;
+  strengthRatio = avgThrall > 0 ? avgCrew / avgThrall : 1;
+  const rawPred = strengthRatio * strengthRatio;
+  const defP = defByKey.get('predatordamage');
+  if (defP) {
+    modifiers.predatordamage = clamp(rawPred, defP.min, defP.max);
   }
 
-  return { modifiers, avgCrew, avgThrall, diff, stepsUsed };
+  return { modifiers, avgCrew, avgThrall, diff, stepsUsed: 0, strengthRatio };
 }
