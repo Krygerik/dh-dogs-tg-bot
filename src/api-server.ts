@@ -2,7 +2,7 @@ import http from 'http';
 import { URL } from 'url';
 import { ServerConfig } from './types';
 import { ServerManager } from './server-manager';
-import { API_PORT, API_TOKEN, TEST_PARAMS_SOLO, TEST_PARAMS_DUO } from './config';
+import { API_PORT, API_TOKEN, TEST_PARAMS_SOLO, TEST_PARAMS_DUO, isAppEnvDev } from './config';
 import { sendJson, requestLocalJson, readJsonBody, isAuthorized } from './utils/http';
 import { loadMapReferences } from './reference/maps';
 import { listStableMods, listModCollections, resolveModScripts, parseMods } from './reference/mods';
@@ -14,7 +14,9 @@ import { PlayerRecord } from './stats/stats-types';
 import { statsStore } from './stats/stats-store';
 import { computePlayerRatingsMap } from './stats/elo';
 import {
+  buildClassicDevMockRatingByName,
   computeEloBalanceModifiers,
+  ELO_DEV_SOLO_SYNTHETIC_CLASSIC_LOBBY,
   EloBalanceInputPlayer
 } from './stats/balance-modifiers';
 export function createApiServer(config: ServerConfig, serverManager: ServerManager) {
@@ -379,24 +381,52 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           }
         }
         const sessions = await statsStore.readAll();
-        const ratingByName = computePlayerRatingsMap(sessions);
-        const { definitions } = loadCustomModifiers();
+        const initialRating = 1500;
+        /** В dev соло-тест не присылает 6+2 — подставляем синтетическое лобби и мок рейтингов. */
+        const useDevClassicMock = isAppEnvDev();
+        const playersForBalance: EloBalanceInputPlayer[] = useDevClassicMock
+          ? [...ELO_DEV_SOLO_SYNTHETIC_CLASSIC_LOBBY]
+          : players;
+        const ratingByName = useDevClassicMock
+          ? buildClassicDevMockRatingByName(playersForBalance, initialRating)
+          : computePlayerRatingsMap(sessions);
         const {
           modifiers,
           avgCrew,
           avgThrall,
+          sumCrewRatings,
+          sumThrallRatings,
+          crewCount,
+          thrallCount,
+          isClassicRoster,
           diff,
           stepsUsed,
-          strengthRatio
-        } = computeEloBalanceModifiers(players, ratingByName, definitions);
+          strengthRatio,
+          totalWeightUnits,
+          damageGridSteps,
+          hpGridSteps,
+          direction
+        } = computeEloBalanceModifiers(playersForBalance, ratingByName, { initialRating });
         sendJson(res, 200, {
           ok: true,
           modifiers,
           avgCrew,
           avgThrall,
+          sumCrewRatings,
+          sumThrallRatings,
+          crewCount,
+          thrallCount,
+          isClassicRoster,
           diff,
           stepsUsed,
-          strengthRatio
+          strengthRatio,
+          totalWeightUnits,
+          damageGridSteps,
+          hpGridSteps,
+          direction,
+          devRatingMock: useDevClassicMock,
+          balanceRequestPlayerCount: players.length,
+          balanceResolvedFrom: useDevClassicMock ? 'synthetic_dev_solo' : 'live'
         });
         return;
       }

@@ -1,10 +1,9 @@
 'use strict';
 
 /**
- * Elo-баланс: OnPokerRoundEnded + fallback Tick → API /stats/elo-balance → predatordamage → __DH_PREDATOR_DAMAGE_MULT.
- * Уведомление всем: ReceiveThrallMessage (0xEE7810) + GetPlayerController / GetOwningController;
- *   обход PlayerArray, SetPlayerRole (0xE4F390), ADH_HumanCharacter::AddStartingInventory (0xD46F10).
- * Дубликат: globalThis.__DH_ELO_BALANCE_INSTALLED.
+ * Elo-баланс: predatordamage / predatorhealth (API /stats/elo-balance).
+ * Множители только из ответа API (в dev рейтинги мокаются на стороне бота, не здесь).
+ * Thrall: ReceiveThrallMessage + PlayerArray, SetPlayerRole, AddStartingInventory.
  */
 
 const MODULE_NAME = 'DreadHungerServer-Win64-Shipping.exe';
@@ -48,20 +47,6 @@ if (base === null) {
   const SOLO_TEST = globalThis.__DH_ELO_BALANCE_SOLO_TEST === true;
   // const DEBUG = globalThis.__DH_ELO_BALANCE_DEBUG === true;
   const DISABLE_FALLBACK = globalThis.__DH_ELO_BALANCE_DISABLE_FALLBACK === true;
-
-  const DAYS_BEFORE_BLIZZARD_MIN = 2;
-  const DAYS_BEFORE_BLIZZARD_MAX = 7;
-  const DAY_MINUTES_MIN = 5;
-  const DAY_MINUTES_MAX = 16;
-
-  const SOLO_SYNTHETIC_PRESET = {
-    coldintensity: 3,
-    hungerrate: 3,
-    dayminutes: DAY_MINUTES_MIN,
-    daysbeforeblizzard: DAYS_BEFORE_BLIZZARD_MIN,
-    predatordamage: 3,
-    coalburnrate: 0.1,
-  };
 
   let balanceApplied = false;
   let fallbackTickCounter = 0;
@@ -167,6 +152,13 @@ if (base === null) {
     return r.toFixed(2).replace(/\.?0+$/, '');
   }
 
+  /** Множитель ×1 (или не задан) — влияния на игру нет. */
+  function isNeutralPredatorMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return true;
+    return Math.abs(n - 1) < 1e-4;
+  }
+
   function buildFTextFromMessageLine(line) {
     const FName_FName = new NativeFunction(base.add(RVA_FNAME_FNAME), 'void', ['pointer', 'pointer', 'int8'], 'win64');
     const FText_FromName = new NativeFunction(base.add(RVA_FTEXT_FROM_NAME), 'pointer', ['pointer', 'pointer'], 'win64');
@@ -187,10 +179,10 @@ if (base === null) {
     } catch (_e) {}
   }
 
-  /** Каждому игроку с валидным PC (как announcement_win64.js на SetPlayerRole). */
+  /** Каждому игроку с валидным PC — по две строки (урон и здоровье), отдельные ReceiveThrallMessage. */
   function trySendPredatorNoticeToPlayerState(playerStatePtr) {
-    const pending = globalThis.__DH_ELO_THRALL_NOTICE_TEXT;
-    if (!pending || typeof pending !== 'string') return;
+    const lines = globalThis.__DH_ELO_THRALL_NOTICE_LINES;
+    if (!Array.isArray(lines) || lines.length === 0) return;
     try {
       if (!playerStatePtr || playerStatePtr.isNull()) return;
       const k = playerStatePtr.toString();
@@ -203,8 +195,12 @@ if (base === null) {
       }
       const pc = nativeGetPlayerController(playerStatePtr, pid | 0);
       if (!pc || pc.isNull()) return;
-      const ft = buildFTextFromMessageLine(pending);
-      sendThrallMessageToPlayerController(pc, ft);
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (typeof line !== 'string' || !line.length) continue;
+        const ft = buildFTextFromMessageLine(line);
+        sendThrallMessageToPlayerController(pc, ft);
+      }
       balanceNoticeSentForPlayerState.add(k);
     } catch (_e) {}
   }
@@ -214,8 +210,8 @@ if (base === null) {
    * Дубли с trySendPredatorNoticeToPlayerState отсекаются по balanceNoticeSentForPlayerState.
    */
   function trySendPredatorNoticeFromHumanCharacter(humanCharPtr) {
-    const pending = globalThis.__DH_ELO_THRALL_NOTICE_TEXT;
-    if (!pending || typeof pending !== 'string') return;
+    const lines = globalThis.__DH_ELO_THRALL_NOTICE_LINES;
+    if (!Array.isArray(lines) || lines.length === 0) return;
     try {
       if (!humanCharPtr || humanCharPtr.isNull()) return;
       const ps = safeReadPointer(humanCharPtr.add(OFF_HUMAN_CHARACTER_PLAYER_STATE));
@@ -224,8 +220,12 @@ if (base === null) {
       if (balanceNoticeSentForPlayerState.has(k)) return;
       const pc = nativeGetOwningController(ps);
       if (!pc || pc.isNull()) return;
-      const ft = buildFTextFromMessageLine(pending);
-      sendThrallMessageToPlayerController(pc, ft);
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (typeof line !== 'string' || !line.length) continue;
+        const ft = buildFTextFromMessageLine(line);
+        sendThrallMessageToPlayerController(pc, ft);
+      }
       balanceNoticeSentForPlayerState.add(k);
     } catch (_e) {}
   }
@@ -244,31 +244,58 @@ if (base === null) {
     } catch (_e) {}
   }
 
-  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, mult) {
-    const disp = formatMultDisplay(mult);
-    const line = 'В данной игре урон от хищников был изменен на ' + disp + 'x.';
-    globalThis.__DH_ELO_THRALL_NOTICE_TEXT = line;
+  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult) {
+    const lines = [];
+    if (!isNeutralPredatorMult(dmgMult)) {
+      lines.push(
+        'В данной игре урон от хищников был изменен на ' + formatMultDisplay(dmgMult) + 'x.'
+      );
+    }
+    if (!isNeutralPredatorMult(hpMult)) {
+      lines.push('Здоровье хищников в этой игре: ' + formatMultDisplay(hpMult) + 'x.');
+    }
+    globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
+    if (lines.length === 0) {
+      return;
+    }
     broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr);
+  }
+
+  /** Сетка множителей как в API elo-balance: [0.25, 3], шаг 0.25. */
+  const PRED_MULT_MIN = 0.25;
+  const PRED_MULT_MAX = 3;
+  const PRED_MULT_STEP = 0.25;
+
+  function snapPredatorMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      return 1;
+    }
+    const q = Math.round(n / PRED_MULT_STEP) * PRED_MULT_STEP;
+    if (q < PRED_MULT_MIN) return PRED_MULT_MIN;
+    if (q > PRED_MULT_MAX) return PRED_MULT_MAX;
+    return q;
   }
 
   function applyPredatorDamageMultiplierFromModifiers(modifiers) {
     const raw = modifiers && typeof modifiers.predatordamage === 'number' ? modifiers.predatordamage : 1;
-    const v = Number(raw);
-    if (!Number.isFinite(v) || v <= 0) {
-      globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
-    } else {
-      globalThis.__DH_PREDATOR_DAMAGE_MULT = v;
-    }
+    globalThis.__DH_PREDATOR_DAMAGE_MULT = snapPredatorMult(raw);
+  }
+
+  function applyPredatorHealthMultiplierFromModifiers(modifiers) {
+    const raw = modifiers && typeof modifiers.predatorhealth === 'number' ? modifiers.predatorhealth : 1;
+    globalThis.__DH_PREDATOR_HP_MULT = snapPredatorMult(raw);
   }
 
   function applyModifiersStub(modifiers) {
-    applyPredatorDamageMultiplierFromModifiers(modifiers || {});
+    const m = modifiers || {};
+    applyPredatorDamageMultiplierFromModifiers(m);
+    applyPredatorHealthMultiplierFromModifiers(m);
   }
 
+  /** SOLO_TEST: без подмешивания фиксированных множителей — только ответ API. */
   function mergeSoloSynthetic(modifiers) {
-    const m = modifiers && typeof modifiers === 'object' ? { ...modifiers } : {};
-    Object.assign(m, SOLO_SYNTHETIC_PRESET);
-    return m;
+    return modifiers && typeof modifiers === 'object' ? { ...modifiers } : {};
   }
 
   function maybeScheduleBalanceFallback() {
@@ -353,10 +380,16 @@ if (base === null) {
       }
 
       applyModifiersStub(modifiers);
-      setPredatorThrallNoticeAndTryDeliver(gameStatePtr, globalThis.__DH_PREDATOR_DAMAGE_MULT);
+      setPredatorThrallNoticeAndTryDeliver(
+        gameStatePtr,
+        globalThis.__DH_PREDATOR_DAMAGE_MULT,
+        globalThis.__DH_PREDATOR_HP_MULT
+      );
       logLine(
         'predatordamage=' +
           formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) +
+          ' predatorhealth=' +
+          formatMultDisplay(globalThis.__DH_PREDATOR_HP_MULT) +
           ' trigger=' +
           (trigger || 'OnPokerRoundEnded')
       );
@@ -365,10 +398,20 @@ if (base === null) {
       globalThis.__DH_ELO_BALANCE_DONE_GLOBAL = true;
 
       if (STATS_SESSION_ID) {
+        const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
         send({
           type: 'elo_balance_meta',
           sessionId: STATS_SESSION_ID,
-          balancerAppliedModifiers: modifiers,
+          balancerAppliedModifiers: {
+            predatordamage:
+              typeof m.predatordamage === 'number' && Number.isFinite(m.predatordamage)
+                ? m.predatordamage
+                : globalThis.__DH_PREDATOR_DAMAGE_MULT,
+            predatorhealth:
+              typeof m.predatorhealth === 'number' && Number.isFinite(m.predatorhealth)
+                ? m.predatorhealth
+                : globalThis.__DH_PREDATOR_HP_MULT,
+          },
         });
       }
     } finally {
@@ -426,6 +469,10 @@ if (base === null) {
 })();
 
 globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
+globalThis.__DH_PREDATOR_HP_MULT = 1;
 if (typeof installPredatorDamageHooks === 'function') {
   installPredatorDamageHooks(base);
+}
+if (typeof installPredatorHealthHooks === 'function') {
+  installPredatorHealthHooks(base);
 }

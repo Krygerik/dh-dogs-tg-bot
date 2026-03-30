@@ -266,6 +266,14 @@ def on_message(msg, data):
                 except UnicodeEncodeError:
                     print(line.encode("ascii", "replace").decode("ascii"))
                 return
+            if ptype == "predator_hp_log":
+                hook = payload.get("hook", "")
+                line = f"[predator_hp][{hook}] {payload.get('message', '')}"
+                try:
+                    print(line)
+                except UnicodeEncodeError:
+                    print(line.encode("ascii", "replace").decode("ascii"))
+                return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
         return
@@ -363,14 +371,15 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
             main_code = file.read()
             norm = script_path.replace("\\", "/")
             if norm.endswith("elo_balance_modifiers/elo_balance_modifiers.js"):
-                lib_path = resolve_script_path(
-                    "patches/technical/elo_balance_modifiers/predator_damage_lib.js"
-                )
-                if os.path.exists(lib_path):
-                    with open(lib_path, "r", encoding="utf-8") as lf:
-                        main_code = lf.read() + "\n" + main_code
-                else:
-                    print(f"Warning: predator_damage_lib.js not found: {lib_path}")
+                for lib_name in ("predator_damage_lib.js", "predator_health_lib.js"):
+                    lib_path = resolve_script_path(
+                        "patches/technical/elo_balance_modifiers/" + lib_name
+                    )
+                    if os.path.exists(lib_path):
+                        with open(lib_path, "r", encoding="utf-8") as lf:
+                            main_code = lf.read() + "\n" + main_code
+                    else:
+                        print(f"Warning: {lib_name} not found: {lib_path}")
             script_code = prefix + main_code
             script = inject_script(session, script_code, script_path)
             if script:
