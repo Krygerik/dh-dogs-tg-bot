@@ -1,2 +1,3 @@
 patches/stable/mana_on_start/mana_on_start.js
 patches/stable/spirit_walk_on_demand_ver2/spirit_walk_on_demand_ver2.js
+patches/stable/disconnect_notice_ru/disconnect_notice_ru.js

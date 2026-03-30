@@ -7,3 +7,4 @@ patches/stable/spirit_walk_on_demand_ver2/spirit_walk_on_demand_ver2.js
 patches/stable/add_extra_things/add_extra_things.js
 patches/stable/charge_one_on_start/charge_one_on_start.js
 patches/stable/arrows/arrows.js
+patches/stable/disconnect_notice_ru/disconnect_notice_ru.js
