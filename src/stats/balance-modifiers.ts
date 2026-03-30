@@ -160,12 +160,12 @@ export function splitTotalWeightBetweenDamageHpAndCraft(
   };
 }
 
-const DEFAULT_WEIGHT_SCALE = 4;
+const DEFAULT_WEIGHT_SCALE = 20;
 const DEFAULT_MAX_TOTAL_WEIGHT = 48;
 
 /**
  * strengthRatio = avgCrew / avgThrall (средний рейтинг на слот команды).
- * Дальше: T ≈ scale · |strengthRatio² − 1|, случайный сплит урона/HP/крафта.
+ * Дальше: T = round(weightScale · |strengthRatio² − 1|), случайный сплит урона/HP/крафта.
  */
 export function computeEloBalanceModifiers(
   players: EloBalanceInputPlayer[],
