@@ -274,6 +274,14 @@ def on_message(msg, data):
                 except UnicodeEncodeError:
                     print(line.encode("ascii", "replace").decode("ascii"))
                 return
+            if ptype == "workbench_craft_speed_log":
+                hook = payload.get("hook", "")
+                line = f"[workbench_craft][{hook}] {payload.get('message', '')}"
+                try:
+                    print(line)
+                except UnicodeEncodeError:
+                    print(line.encode("ascii", "replace").decode("ascii"))
+                return
     if msg.get("type") == "error":
         print("[frida:error]", msg)
         return
@@ -371,7 +379,11 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
             main_code = file.read()
             norm = script_path.replace("\\", "/")
             if norm.endswith("elo_balance_modifiers/elo_balance_modifiers.js"):
-                for lib_name in ("predator_damage_lib.js", "predator_health_lib.js"):
+                for lib_name in (
+                    "predator_damage_lib.js",
+                    "predator_health_lib.js",
+                    "workbench_craft_speed_lib.js",
+                ):
                     lib_path = resolve_script_path(
                         "patches/technical/elo_balance_modifiers/" + lib_name
                     )

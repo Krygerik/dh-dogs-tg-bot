@@ -1,5 +1,5 @@
 /**
- * Elo-баланс: predatordamage и predatorhealth вычисляются отдельно.
+ * Elo-баланс: predatordamage, predatorhealth, craftspeed.
  *
  * Классический режим: 8 игроков — 6 мирных (crew) и 2 предателя (thrall).
  * Сравнение команд: средний рейтинг по слоту команды (avgCrew vs avgThrall).
@@ -7,8 +7,8 @@
  * При равном уровне игры у всех восьмерых одинаковый рейтинг → avgCrew = avgThrall → нейтральные множители.
  *
  * Суммарный вес случайно распределяется между модификаторами:
- * 1 ед. веса = шаг 0.25 по урону, 3 ед. = шаг 0.25 по HP.
- * Множители: [0.25, 3], шаг 0.25.
+ * 1 ед. веса = шаг 0.25 по урону (predatordamage); 3 ед. = шаг 0.25 по HP; 2 ед. = шаг 0.25 по скорости крафта (= два шага урона по весу).
+ * Урон/HP: [0.25, 3], шаг 0.25. Скорость крафта: [0.5, 2], шаг 0.25, нейтраль 1.
  */
 
 export const ELO_CLASSIC_CREW_TEAM_SIZE = 6;
@@ -24,8 +24,14 @@ export const ELO_PREDATOR_MULT_STEP = 0.25;
 export const ELO_WEIGHT_PER_DAMAGE_GRID_STEP = 1;
 /** Вес одного шага сетки по HP равен трём шагам урона по весу. */
 export const ELO_WEIGHT_PER_HP_GRID_STEP = 3;
+/** Вес одного шага сетки по скорости крафта — два шага predatordamage (см. ELO_WEIGHT_PER_DAMAGE_GRID_STEP). */
+export const ELO_WEIGHT_PER_CRAFT_GRID_STEP = 2 * ELO_WEIGHT_PER_DAMAGE_GRID_STEP;
 
-export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth'] as const;
+export const ELO_CRAFT_MULT_MIN = 0.5;
+export const ELO_CRAFT_MULT_MAX = 2;
+export const ELO_CRAFT_MULT_STEP = 0.25;
+
+export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth', 'craftspeed'] as const;
 
 export type EloBalanceModifierKey = (typeof ELO_BALANCE_MODIFIER_KEYS)[number];
 
@@ -39,6 +45,12 @@ function clamp(n: number, min: number, max: number): number {
 export function quantizePredatorMultiplier(raw: number): number {
   const q = Math.round(raw / ELO_PREDATOR_MULT_STEP) * ELO_PREDATOR_MULT_STEP;
   return clamp(q, ELO_PREDATOR_MULT_MIN, ELO_PREDATOR_MULT_MAX);
+}
+
+/** Сетка [0.5, 2], шаг 0.25, нейтраль 1. */
+export function quantizeCraftMultiplier(raw: number): number {
+  const q = Math.round(raw / ELO_CRAFT_MULT_STEP) * ELO_CRAFT_MULT_STEP;
+  return clamp(q, ELO_CRAFT_MULT_MIN, ELO_CRAFT_MULT_MAX);
 }
 
 export type EloBalanceInputPlayer = {
@@ -125,12 +137,35 @@ export function splitTotalWeightBetweenDamageAndHp(
   return { damageGridSteps: d, hpGridSteps: h };
 }
 
+/**
+ * Случайное разбиение T: d + 3h + 2c = T (c — шаги craftspeed, 2 ед. веса на шаг = два шага урона).
+ */
+export function splitTotalWeightBetweenDamageHpAndCraft(
+  totalWeightUnits: number,
+  rng: () => number
+): { damageGridSteps: number; hpGridSteps: number; craftGridSteps: number } {
+  const T = Math.max(0, Math.floor(totalWeightUnits));
+  if (T === 0) {
+    return { damageGridSteps: 0, hpGridSteps: 0, craftGridSteps: 0 };
+  }
+  const wCraft = ELO_WEIGHT_PER_CRAFT_GRID_STEP;
+  const maxCraft = Math.floor(T / wCraft);
+  const craftGridSteps = Math.floor(rng() * (maxCraft + 1));
+  const rem = T - wCraft * craftGridSteps;
+  const split = splitTotalWeightBetweenDamageAndHp(rem, rng);
+  return {
+    damageGridSteps: split.damageGridSteps,
+    hpGridSteps: split.hpGridSteps,
+    craftGridSteps,
+  };
+}
+
 const DEFAULT_WEIGHT_SCALE = 4;
 const DEFAULT_MAX_TOTAL_WEIGHT = 48;
 
 /**
  * strengthRatio = avgCrew / avgThrall (средний рейтинг на слот команды).
- * Дальше: T ≈ scale · |strengthRatio² − 1|, случайный сплит урона/HP.
+ * Дальше: T ≈ scale · |strengthRatio² − 1|, случайный сплит урона/HP/крафта.
  */
 export function computeEloBalanceModifiers(
   players: EloBalanceInputPlayer[],
@@ -151,6 +186,7 @@ export function computeEloBalanceModifiers(
   totalWeightUnits: number;
   damageGridSteps: number;
   hpGridSteps: number;
+  craftGridSteps: number;
   direction: 1 | -1 | 0;
 } {
   const initial = options?.initialRating ?? 1500;
@@ -173,15 +209,18 @@ export function computeEloBalanceModifiers(
   const isClassicRoster = isClassicEightPlayerRoster(players);
 
   const neutral = quantizePredatorMultiplier(1);
+  const neutralCraft = quantizeCraftMultiplier(1);
   const modifiers: Record<EloBalanceModifierKey, number> = {
     predatordamage: neutral,
     predatorhealth: neutral,
+    craftspeed: neutralCraft,
   };
 
   let strengthRatio = 1;
   let totalWeightUnits = 0;
   let damageGridSteps = 0;
   let hpGridSteps = 0;
+  let craftGridSteps = 0;
   let direction: 1 | -1 | 0 = 0;
 
   if (crewCount === 0 || thrallCount === 0) {
@@ -200,6 +239,7 @@ export function computeEloBalanceModifiers(
       totalWeightUnits,
       damageGridSteps,
       hpGridSteps,
+      craftGridSteps,
       direction,
     };
   }
@@ -223,6 +263,7 @@ export function computeEloBalanceModifiers(
       totalWeightUnits: 0,
       damageGridSteps: 0,
       hpGridSteps: 0,
+      craftGridSteps: 0,
       direction: 0,
     };
   }
@@ -233,13 +274,17 @@ export function computeEloBalanceModifiers(
     Math.round(Math.abs(deviation) * weightScale)
   );
 
-  const split = splitTotalWeightBetweenDamageAndHp(totalWeightUnits, rng);
+  const split = splitTotalWeightBetweenDamageHpAndCraft(totalWeightUnits, rng);
   damageGridSteps = split.damageGridSteps;
   hpGridSteps = split.hpGridSteps;
+  craftGridSteps = split.craftGridSteps;
 
   const step = ELO_PREDATOR_MULT_STEP;
   modifiers.predatordamage = quantizePredatorMultiplier(1 + direction * damageGridSteps * step);
   modifiers.predatorhealth = quantizePredatorMultiplier(1 + direction * hpGridSteps * step);
+  modifiers.craftspeed = quantizeCraftMultiplier(
+    1 + direction * craftGridSteps * ELO_CRAFT_MULT_STEP
+  );
 
   return {
     modifiers,
@@ -251,11 +296,12 @@ export function computeEloBalanceModifiers(
     thrallCount,
     isClassicRoster,
     diff,
-    stepsUsed: damageGridSteps + hpGridSteps,
+    stepsUsed: damageGridSteps + hpGridSteps + craftGridSteps,
     strengthRatio,
     totalWeightUnits,
     damageGridSteps,
     hpGridSteps,
+    craftGridSteps,
     direction,
   };
 }

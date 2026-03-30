@@ -3,6 +3,7 @@
 /**
  * Один путь: ADH_Character::AdjustDamage (impl) — множитель globalThis.__DH_PREDATOR_DAMAGE_MULT.
  * installPredatorDamageHooks(base) один раз после проверки base.
+ * В elo-balance один шаг сетки predatordamage = 1 ед. веса; один шаг craftspeed = 2 ед. (два таких шага).
  */
 
 function installPredatorDamageHooks(base) {
