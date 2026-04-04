@@ -390,6 +390,16 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         const ratingByName = useDevClassicMock
           ? buildClassicDevMockRatingByName(playersForBalance, initialRating)
           : computePlayerRatingsMap(sessions);
+        console.log(
+          '[elo-balance]',
+          playersForBalance
+            .map((p) => {
+              const raw = ratingByName.get(p.name) ?? initialRating;
+              const rating = Math.round(raw * 10) / 10;
+              return `${p.name}: ${rating}`;
+            })
+            .join(', ')
+        );
         const {
           modifiers,
           avgCrew,

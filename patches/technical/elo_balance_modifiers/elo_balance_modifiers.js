@@ -261,10 +261,10 @@ if (base === null) {
           'x.'
       );
     }
-    globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
     if (lines.length === 0) {
-      return;
+      lines.push('Nothing happened');
     }
+    globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
     broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr);
   }
 
