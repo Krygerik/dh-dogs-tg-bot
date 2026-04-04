@@ -200,7 +200,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
-        const enableEloBalancer = body.enableEloBalancer === true;
+        const enableEloBalancer = body.enableEloBalancer !== false;
         const session = await serverManager.startSession(
           mapName,
           undefined,
@@ -259,7 +259,7 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
         }
         const enableTelemetry = Boolean(body.enableTelemetry);
         const enableScoreboardStats = body.enableScoreboardStats !== false;
-        const enableEloBalancer = body.enableEloBalancer === true;
+        const enableEloBalancer = body.enableEloBalancer !== false;
         const session = await serverManager.startSession(
           mapName,
           params,
