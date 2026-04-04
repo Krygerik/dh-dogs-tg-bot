@@ -2,9 +2,11 @@
  * Elo-баланс: predatordamage, predatorhealth, craftspeed.
  *
  * Классический режим: 8 игроков — 6 мирных (crew) и 2 предателя (thrall).
- * Сравнение команд: средний рейтинг по слоту команды (avgCrew vs avgThrall).
- * Это то же самое, что (sumCrew/6) / (sumThrall/2) при полном составе 6+2.
- * При равном уровне игры у всех восьмерых одинаковый рейтинг → avgCrew = avgThrall → нейтральные множители.
+ * Сравнение команд: средний рейтинг (avgCrew vs avgThrall).
+ *
+ * Суммарный вес T: по одной единице на каждые ELO_RATING_DIFF_PER_WEIGHT_UNIT пунктов
+ * разницы |avgCrew − avgThrall| (floor), опционально множитель для неклассики — см. опции,
+ * по умолчанию как у классического 6+2, сверху — maxTotalWeightUnits.
  *
  * Суммарный вес случайно распределяется между модификаторами:
  * 1 ед. веса = шаг 0.25 по урону (predatordamage); 3 ед. = шаг 0.25 по HP; 2 ед. = шаг 0.25 по скорости крафта (= два шага урона по весу).
@@ -30,6 +32,12 @@ export const ELO_WEIGHT_PER_CRAFT_GRID_STEP = 2 * ELO_WEIGHT_PER_DAMAGE_GRID_STE
 export const ELO_CRAFT_MULT_MIN = 0.5;
 export const ELO_CRAFT_MULT_MAX = 2;
 export const ELO_CRAFT_MULT_STEP = 0.25;
+
+/** Одна единица суммарного веса на каждые столько пунктов разницы средних рейтингов команд. */
+export const ELO_RATING_DIFF_PER_WEIGHT_UNIT = 5;
+
+/** Множитель веса для неклассического состава (по умолчанию 1 — как у классического 6+2). */
+export const ELO_NON_CLASSIC_ROSTER_WEIGHT_MULTIPLIER = 1;
 
 export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth', 'craftspeed'] as const;
 
@@ -62,11 +70,10 @@ export type EloBalanceComputeOptions = {
   initialRating?: number;
   /** По умолчанию Math.random; для тестов можно подставить детерминированный RNG. */
   rng?: () => number;
-  /**
-   * Масштаб перевода |strengthRatio² − 1| в целые единицы суммарного веса.
-   * Чем больше — тем сильнее отклонение множителей при том же дисбалансе команд.
-   */
-  weightScale?: number;
+  /** Пунктов разницы средних (|avgCrew − avgThrall|) на одну единицу веса (по умолчанию ELO_RATING_DIFF_PER_WEIGHT_UNIT). */
+  ratingDiffPerWeightUnit?: number;
+  /** Множитель веса для неклассического состава (по умолчанию 1, как у 6+2). */
+  nonClassicRosterWeightMultiplier?: number;
   /** Верхняя граница суммарного веса (защита от постоянного упора в 3x). */
   maxTotalWeightUnits?: number;
 };
@@ -160,12 +167,11 @@ export function splitTotalWeightBetweenDamageHpAndCraft(
   };
 }
 
-const DEFAULT_WEIGHT_SCALE = 20;
 const DEFAULT_MAX_TOTAL_WEIGHT = 48;
 
 /**
- * strengthRatio = avgCrew / avgThrall (средний рейтинг на слот команды).
- * Дальше: T = round(weightScale · |strengthRatio² − 1|), случайный сплит урона/HP/крафта.
+ * T из разницы средних рейтингов команд и множителя классического состава;
+ * дальше случайный сплит урона/HP/крафта.
  */
 export function computeEloBalanceModifiers(
   players: EloBalanceInputPlayer[],
@@ -191,8 +197,11 @@ export function computeEloBalanceModifiers(
 } {
   const initial = options?.initialRating ?? 1500;
   const rng = options?.rng ?? Math.random;
-  const weightScale = options?.weightScale ?? DEFAULT_WEIGHT_SCALE;
   const maxTotalWeightUnits = options?.maxTotalWeightUnits ?? DEFAULT_MAX_TOTAL_WEIGHT;
+  const ratingDiffPerUnit =
+    options?.ratingDiffPerWeightUnit ?? ELO_RATING_DIFF_PER_WEIGHT_UNIT;
+  const nonClassicMult =
+    options?.nonClassicRosterWeightMultiplier ?? ELO_NON_CLASSIC_ROSTER_WEIGHT_MULTIPLIER;
 
   const crew = players.filter((p) => !p.traitor);
   const thralls = players.filter((p) => p.traitor);
@@ -245,9 +254,7 @@ export function computeEloBalanceModifiers(
   }
 
   strengthRatio = avgThrall > 0 ? avgCrew / avgThrall : 1;
-  const raw = strengthRatio * strengthRatio;
-  const deviation = raw - 1;
-  if (Math.abs(deviation) < 1e-9) {
+  if (Math.abs(diff) < 1e-9) {
     return {
       modifiers,
       avgCrew,
@@ -268,12 +275,35 @@ export function computeEloBalanceModifiers(
     };
   }
 
-  direction = deviation > 0 ? 1 : -1;
+  const baseUnits = Math.floor(Math.abs(diff) / ratingDiffPerUnit);
+  const rosterFactor = isClassicRoster ? 1 : nonClassicMult;
   totalWeightUnits = Math.min(
     maxTotalWeightUnits,
-    Math.round(Math.abs(deviation) * weightScale)
+    Math.max(0, Math.floor(baseUnits * rosterFactor))
   );
 
+  if (totalWeightUnits === 0) {
+    return {
+      modifiers,
+      avgCrew,
+      avgThrall,
+      sumCrewRatings,
+      sumThrallRatings,
+      crewCount,
+      thrallCount,
+      isClassicRoster,
+      diff,
+      stepsUsed: 0,
+      strengthRatio,
+      totalWeightUnits: 0,
+      damageGridSteps: 0,
+      hpGridSteps: 0,
+      craftGridSteps: 0,
+      direction: 0,
+    };
+  }
+
+  direction = diff > 0 ? 1 : -1;
   const split = splitTotalWeightBetweenDamageHpAndCraft(totalWeightUnits, rng);
   damageGridSteps = split.damageGridSteps;
   hpGridSteps = split.hpGridSteps;
