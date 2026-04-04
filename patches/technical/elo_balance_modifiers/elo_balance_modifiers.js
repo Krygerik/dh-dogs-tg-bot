@@ -244,6 +244,28 @@ if (base === null) {
     } catch (_e) {}
   }
 
+  /**
+   * Сразу после покера на dedicated PC у части игроков ещё нет — ReceiveThrallMessage не уходит.
+   * Повторяем рассылку с тем же текстом (дубликаты отсекаются по balanceNoticeSentForPlayerState).
+   */
+  function scheduleThrallNoticeRetries(gameModePtr) {
+    const lines = globalThis.__DH_ELO_THRALL_NOTICE_LINES;
+    if (!Array.isArray(lines) || lines.length === 0) return;
+    const snapshot = lines.slice();
+    const delaysMs = [400, 1200, 3000, 6000];
+    delaysMs.forEach((ms) => {
+      setTimeout(() => {
+        try {
+          if (!gameModePtr || gameModePtr.isNull()) return;
+          const gs = getGameStateFromGameMode(gameModePtr);
+          if (!gs) return;
+          globalThis.__DH_ELO_THRALL_NOTICE_LINES = snapshot;
+          broadcastPredatorNoticeToAllPlayersInGameState(gs);
+        } catch (_e) {}
+      }, ms);
+    });
+  }
+
   function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult, craftMult) {
     const lines = [];
     if (!isNeutralPredatorMult(dmgMult)) {
@@ -415,6 +437,7 @@ if (base === null) {
         globalThis.__DH_PREDATOR_HP_MULT,
         globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT
       );
+      scheduleThrallNoticeRetries(gameModePtr);
       logLine(
         'predatordamage=' +
           formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) +
