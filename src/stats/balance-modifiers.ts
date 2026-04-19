@@ -8,15 +8,14 @@
  * разницы |avgCrew − avgThrall| (floor), опционально множитель для неклассики — см. опции,
  * по умолчанию как у классического 6+2, сверху — maxTotalWeightUnits.
  *
- * Суммарный вес случайно распределяется между модификаторами predatordamage / predatorhealth:
- * 1 ед. веса = шаг 0.25 по урону; 3 ед. = шаг 0.25 по HP.
- * Урон/HP: [0.25, 3], шаг 0.25.
+ * Случайный сплит бюджета T между predatordamage и predatorhealth: на каждый шаг сетки 0.25
+ * по любому из двух — ровно ELO_WEIGHT_PER_GRID_STEP единиц веса (по умолчанию 1).
+ * Урон/HP хищников: [0.25, 3], шаг 0.25.
  *
- * playermeleedamage [0.5, 2], шаг 0.25, нейтраль 1 — отдельно от бюджета T:
- * выше 1 при преимуществе мирных по рейтингу, ниже 1 при преимуществе предателей.
+ * playermeleedamage [0.5, 2], шаг 0.25 — масштаб «стоимости шага» тот же (1 ед. на шаг 0.25), без участия в сплите d/h;
+ * формула от diff (рейтинг).
  *
- * playerrangedamage [0.25, 1], шаг 0.25, нейтраль 1 — только ослабление дальнобоя игроков (лук/пистолет/мушкет);
- * активируется при diff < 0 и суммарном весе T ≥ ELO_MIN_WEIGHT_UNITS_FOR_PLAYER_RANGED (усиление мирных при отставании по рейтингу).
+ * playerrangedamage [0.25, 1], шаг 0.25 — та же стоимость шага; активация при diff < 0 и T ≥ минимума.
  */
 
 export const ELO_CLASSIC_CREW_TEAM_SIZE = 6;
@@ -28,10 +27,15 @@ export const ELO_PREDATOR_MULT_MIN = 0.25;
 export const ELO_PREDATOR_MULT_MAX = 3;
 export const ELO_PREDATOR_MULT_STEP = 0.25;
 
-/** Вес одного шага сетки по урону (относительно «бюджета» веса). */
-export const ELO_WEIGHT_PER_DAMAGE_GRID_STEP = 1;
-/** Вес одного шага сетки по HP равен трём шагам урона по весу. */
-export const ELO_WEIGHT_PER_HP_GRID_STEP = 3;
+/**
+ * Единицы веса на один шаг сетки 0.25 по любому из модов (одинаково для всех четырёх).
+ * Сплит T между уроном и HP хищников: d·w + h·w = T, где w = ELO_WEIGHT_PER_GRID_STEP.
+ */
+export const ELO_WEIGHT_PER_GRID_STEP = 1;
+
+/** Синонимы для совместимости (равны ELO_WEIGHT_PER_GRID_STEP). */
+export const ELO_WEIGHT_PER_DAMAGE_GRID_STEP = ELO_WEIGHT_PER_GRID_STEP;
+export const ELO_WEIGHT_PER_HP_GRID_STEP = ELO_WEIGHT_PER_GRID_STEP;
 
 /** Одна единица суммарного веса на каждые столько пунктов разницы средних рейтингов команд. */
 export const ELO_RATING_DIFF_PER_WEIGHT_UNIT = 5;
@@ -197,21 +201,28 @@ export function buildClassicDevMockRatingByName(
 }
 
 /**
- * Случайное разбиение целого бюджета T: d + 3h = T, d,h ≥ 0.
- * d — число шагов сетки по урону, h — по HP.
+ * Случайное разбиение бюджета T между шагами predatordamage и predatorhealth:
+ * d·w + h·w = T, w = ELO_WEIGHT_PER_GRID_STEP (по умолчанию d + h = T).
  */
 export function splitTotalWeightBetweenDamageAndHp(
   totalWeightUnits: number,
   rng: () => number
 ): { damageGridSteps: number; hpGridSteps: number } {
   const T = Math.max(0, Math.floor(totalWeightUnits));
-  if (T === 0) {
+  const w = ELO_WEIGHT_PER_GRID_STEP;
+  if (T === 0 || w <= 0) {
     return { damageGridSteps: 0, hpGridSteps: 0 };
   }
-  const maxH = Math.floor(T / ELO_WEIGHT_PER_HP_GRID_STEP);
-  const h = Math.floor(rng() * (maxH + 1));
-  const d = T - ELO_WEIGHT_PER_HP_GRID_STEP * h;
-  return { damageGridSteps: d, hpGridSteps: h };
+  if (w === 1) {
+    const h = Math.floor(rng() * (T + 1));
+    return { damageGridSteps: T - h, hpGridSteps: h };
+  }
+  const units = T / w;
+  if (!Number.isInteger(units)) {
+    return { damageGridSteps: 0, hpGridSteps: 0 };
+  }
+  const h = Math.floor(rng() * (units + 1));
+  return { damageGridSteps: units - h, hpGridSteps: h };
 }
 
 const DEFAULT_MAX_TOTAL_WEIGHT = 48;

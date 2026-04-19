@@ -3,7 +3,8 @@
 /**
  * Elo-баланс: predatordamage / predatorhealth / playermeleedamage / playerrangedamage (API /stats/elo-balance).
  * Ближний бой [0.5, 2]; дальнобой лук/пистолет/мушкет только [0.25, 1], шаг 0.25.
- * Переопределения: __DH_ELO_PLAYER_MELEE_FORCE, __DH_ELO_PLAYER_RANGED_FORCE; env — loader.py.
+ * Ручной режим: __DH_ELO_MANUAL_OVERRIDE + __DH_ELO_MANUAL_MODIFIERS (prefix loader.py) — без API.
+ * Frida: __DH_ELO_PLAYER_MELEE_FORCE / __DH_ELO_PLAYER_RANGED_FORCE поверх режима api.
  * Thrall: ReceiveThrallMessage + PlayerArray, SetPlayerRole, AddStartingInventory.
  */
 
@@ -320,12 +321,30 @@ if (base === null) {
   }
 
   function applyPredatorDamageMultiplierFromModifiers(modifiers) {
-    const raw = modifiers && typeof modifiers.predatordamage === 'number' ? modifiers.predatordamage : 1;
+    const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    if (globalThis.__DH_ELO_BALANCE_APPLY_MODE === 'manual_env') {
+      const raw = typeof m.predatordamage === 'number' ? m.predatordamage : 1;
+      globalThis.__DH_PREDATOR_DAMAGE_MULT = snapPredatorMult(raw);
+      logLine(
+        'predatordamage mult=' + formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) + ' source=manual_env'
+      );
+      return;
+    }
+    const raw = typeof m.predatordamage === 'number' ? m.predatordamage : 1;
     globalThis.__DH_PREDATOR_DAMAGE_MULT = snapPredatorMult(raw);
   }
 
   function applyPredatorHealthMultiplierFromModifiers(modifiers) {
-    const raw = modifiers && typeof modifiers.predatorhealth === 'number' ? modifiers.predatorhealth : 1;
+    const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    if (globalThis.__DH_ELO_BALANCE_APPLY_MODE === 'manual_env') {
+      const raw = typeof m.predatorhealth === 'number' ? m.predatorhealth : 1;
+      globalThis.__DH_PREDATOR_HP_MULT = snapPredatorMult(raw);
+      logLine(
+        'predatorhealth mult=' + formatMultDisplay(globalThis.__DH_PREDATOR_HP_MULT) + ' source=manual_env'
+      );
+      return;
+    }
+    const raw = typeof m.predatorhealth === 'number' ? m.predatorhealth : 1;
     globalThis.__DH_PREDATOR_HP_MULT = snapPredatorMult(raw);
   }
 
@@ -346,14 +365,21 @@ if (base === null) {
   }
 
   /**
-   * Приоритет (каждый итог логируется отдельным source=):
-   * 1) __DH_ELO_PLAYER_MELEE_FORCE — ручное переопределение в Frida;
-   * 2) env из prefix (DH_ELO_PLAYER_MELEE_TEST ×2 или DH_ELO_PLAYER_MELEE_MULT);
+   * Режим API (не manual_env): приоритет source=
+   * 1) __DH_ELO_PLAYER_MELEE_FORCE — Frida;
+   * 2) legacy __DH_ELO_PLAYER_MELEE_ENV_* (если задать вручную в скрипте);
    * 3) modifiers.playermeleedamage из API;
-   * 4) ×1 по умолчанию.
+   * 4) ×1.
    */
   function applyPlayerMeleeDamageFromModifiers(modifiers) {
     const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    if (globalThis.__DH_ELO_BALANCE_APPLY_MODE === 'manual_env') {
+      const raw = typeof m.playermeleedamage === 'number' ? m.playermeleedamage : 1;
+      const mult = snapPlayerMeleeMult(raw);
+      globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT = mult;
+      logLine('player_melee_damage mult=' + formatMultDisplay(mult) + ' source=manual_env');
+      return;
+    }
     let mult = 1;
     let source = 'default';
 
@@ -399,14 +425,21 @@ if (base === null) {
   }
 
   /**
-   * Приоритет (отдельный source= в логе):
+   * Режим API (не manual_env): приоритет source=
    * 1) __DH_ELO_PLAYER_RANGED_FORCE;
-   * 2) env (DH_ELO_PLAYER_RANGED_TEST ×0.25 или DH_ELO_PLAYER_RANGED_MULT);
+   * 2) legacy __DH_ELO_PLAYER_RANGED_ENV_*;
    * 3) modifiers.playerrangeddamage из API;
    * 4) ×1.
    */
   function applyPlayerRangedDamageFromModifiers(modifiers) {
     const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    if (globalThis.__DH_ELO_BALANCE_APPLY_MODE === 'manual_env') {
+      const raw = typeof m.playerrangedamage === 'number' ? m.playerrangedamage : 1;
+      const mult = snapPlayerRangedMult(raw);
+      globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT = mult;
+      logLine('player_ranged_damage mult=' + formatMultDisplay(mult) + ' source=manual_env');
+      return;
+    }
     let mult = 1;
     let source = 'default';
 
@@ -441,6 +474,62 @@ if (base === null) {
     applyPredatorHealthMultiplierFromModifiers(m);
     applyPlayerMeleeDamageFromModifiers(m);
     applyPlayerRangedDamageFromModifiers(m);
+  }
+
+  /** Слияние spec из prefix: только явно заданные ключи дают ненейтральные значения (остальные ×1). */
+  function buildManualModifiersMerged(spec) {
+    const s = spec && typeof spec === 'object' ? spec : {};
+    return {
+      predatordamage:
+        typeof s.predatordamage === 'number' && Number.isFinite(s.predatordamage)
+          ? snapPredatorMult(s.predatordamage)
+          : 1,
+      predatorhealth:
+        typeof s.predatorhealth === 'number' && Number.isFinite(s.predatorhealth)
+          ? snapPredatorMult(s.predatorhealth)
+          : 1,
+      playermeleedamage:
+        typeof s.playermeleedamage === 'number' && Number.isFinite(s.playermeleedamage)
+          ? snapPlayerMeleeMult(s.playermeleedamage)
+          : 1,
+      playerrangedamage:
+        typeof s.playerrangedamage === 'number' && Number.isFinite(s.playerrangedamage)
+          ? snapPlayerRangedMult(s.playerrangedamage)
+          : 1,
+    };
+  }
+
+  function buildBalancerMetaPayload(modifiers) {
+    if (globalThis.__DH_ELO_MANUAL_OVERRIDE === true) {
+      const manualSpec = globalThis.__DH_ELO_MANUAL_MODIFIERS || {};
+      const out = {};
+      if (typeof manualSpec.predatordamage === 'number' && Number.isFinite(manualSpec.predatordamage)) {
+        out.predatordamage = globalThis.__DH_PREDATOR_DAMAGE_MULT;
+      }
+      if (typeof manualSpec.predatorhealth === 'number' && Number.isFinite(manualSpec.predatorhealth)) {
+        out.predatorhealth = globalThis.__DH_PREDATOR_HP_MULT;
+      }
+      if (typeof manualSpec.playermeleedamage === 'number' && Number.isFinite(manualSpec.playermeleedamage)) {
+        out.playermeleedamage = globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT;
+      }
+      if (typeof manualSpec.playerrangedamage === 'number' && Number.isFinite(manualSpec.playerrangedamage)) {
+        out.playerrangedamage = globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT;
+      }
+      return out;
+    }
+    const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    return {
+      predatordamage:
+        typeof m.predatordamage === 'number' && Number.isFinite(m.predatordamage)
+          ? m.predatordamage
+          : globalThis.__DH_PREDATOR_DAMAGE_MULT,
+      predatorhealth:
+        typeof m.predatorhealth === 'number' && Number.isFinite(m.predatorhealth)
+          ? m.predatorhealth
+          : globalThis.__DH_PREDATOR_HP_MULT,
+      playermeleedamage: globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT,
+      playerrangedamage: globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT,
+    };
   }
 
   /** SOLO_TEST: без подмешивания фиксированных множителей — только ответ API. */
@@ -501,35 +590,60 @@ if (base === null) {
 
       const players = collectPlayers(gameStatePtr);
 
-      send({ type: 'elo_balance_request', players });
+      let modifiers;
 
-      /** Frida 16+: нет блокирующего recv(); только recv(type, cb) + operation.wait() (см. loader.py type). */
-      let api;
-      try {
-        const op = recv('elo_balance_reply', function (message) {
-          api = message;
+      if (globalThis.__DH_ELO_MANUAL_OVERRIDE === true) {
+        const spec =
+          globalThis.__DH_ELO_MANUAL_MODIFIERS && typeof globalThis.__DH_ELO_MANUAL_MODIFIERS === 'object'
+            ? globalThis.__DH_ELO_MANUAL_MODIFIERS
+            : {};
+        modifiers = buildManualModifiersMerged(spec);
+        const keys = Object.keys(spec).filter(function (k) {
+          return typeof spec[k] === 'number' && Number.isFinite(spec[k]);
         });
-        op.wait();
-      } catch (e) {
-        logLine('recv failed: ' + e);
-        return;
-      }
-
-      let modifiers = null;
-      if (api && api.ok && api.modifiers && typeof api.modifiers === 'object') {
-        modifiers = { ...api.modifiers };
+        logLine(
+          'elo_balance mode=manual_env appliedKeys=' +
+            keys.join(',') +
+            ' trigger=' +
+            (trigger || 'OnPokerRoundEnded')
+        );
+        globalThis.__DH_ELO_BALANCE_APPLY_MODE = 'manual_env';
+        applyModifiersStub(modifiers);
+        globalThis.__DH_ELO_BALANCE_APPLY_MODE = undefined;
       } else {
-        if (!SOLO_TEST) {
+        send({ type: 'elo_balance_request', players });
+
+        /** Frida 16+: нет блокирующего recv(); только recv(type, cb) + operation.wait() (см. loader.py type). */
+        let api;
+        try {
+          const op = recv('elo_balance_reply', function (message) {
+            api = message;
+          });
+          op.wait();
+        } catch (e) {
+          logLine('recv failed: ' + e);
           return;
         }
-        modifiers = {};
-      }
 
-      if (SOLO_TEST) {
-        modifiers = mergeSoloSynthetic(modifiers);
-      }
+        modifiers = null;
+        if (api && api.ok && api.modifiers && typeof api.modifiers === 'object') {
+          modifiers = { ...api.modifiers };
+        } else {
+          if (!SOLO_TEST) {
+            return;
+          }
+          modifiers = {};
+        }
 
-      applyModifiersStub(modifiers);
+        if (SOLO_TEST) {
+          modifiers = mergeSoloSynthetic(modifiers);
+        }
+
+        logLine('elo_balance mode=api trigger=' + (trigger || 'OnPokerRoundEnded'));
+        globalThis.__DH_ELO_BALANCE_APPLY_MODE = 'api';
+        applyModifiersStub(modifiers);
+        globalThis.__DH_ELO_BALANCE_APPLY_MODE = undefined;
+      }
       setPredatorThrallNoticeAndTryDeliver(
         gameStatePtr,
         globalThis.__DH_PREDATOR_DAMAGE_MULT,
@@ -555,22 +669,10 @@ if (base === null) {
       globalThis.__DH_ELO_BALANCE_DONE_GLOBAL = true;
 
       if (STATS_SESSION_ID) {
-        const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
         send({
           type: 'elo_balance_meta',
           sessionId: STATS_SESSION_ID,
-          balancerAppliedModifiers: {
-            predatordamage:
-              typeof m.predatordamage === 'number' && Number.isFinite(m.predatordamage)
-                ? m.predatordamage
-                : globalThis.__DH_PREDATOR_DAMAGE_MULT,
-            predatorhealth:
-              typeof m.predatorhealth === 'number' && Number.isFinite(m.predatorhealth)
-                ? m.predatorhealth
-                : globalThis.__DH_PREDATOR_HP_MULT,
-            playermeleedamage: globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT,
-            playerrangeddamage: globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT,
-          },
+          balancerAppliedModifiers: buildBalancerMetaPayload(modifiers),
         });
       }
     } finally {
@@ -637,9 +739,6 @@ if (typeof installPredatorDamageHooks === 'function') {
 if (typeof installPredatorHealthHooks === 'function') {
   installPredatorHealthHooks(base);
 }
-if (typeof installPlayerMeleeDamageHooks === 'function') {
-  installPlayerMeleeDamageHooks(base);
-}
-if (typeof installPlayerRangedDamageHooks === 'function') {
-  installPlayerRangedDamageHooks(base);
+if (typeof installPlayerWeaponDamageHooks === 'function') {
+  installPlayerWeaponDamageHooks(base);
 }

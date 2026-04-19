@@ -345,6 +345,46 @@ def load_scripts_config(map_value, mods_json=None, mods_list=None):
     return dedupe_scripts(scripts)
 
 
+def _snap_elo_grid(value, lo, hi, step=0.25):
+    """Приведение к сетке step в [lo, hi]; при выходе за диапазон — None."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v < lo - 1e-9 or v > hi + 1e-9:
+        return None
+    q = round(v / step) * step
+    if q < lo:
+        q = lo
+    if q > hi:
+        q = hi
+    return q
+
+
+def _parse_elo_manual_modifiers_from_env():
+    """
+    Переменные окружения с явным множителем для мода elo_balance.
+    Если задана хотя бы одна — в prefix попадёт __DH_ELO_MANUAL_OVERRIDE (без вызова API балансировщика).
+    Ключи совпадают с полями API modifiers.
+    """
+    rows = [
+        ("DH_ELO_PREDATOR_DAMAGE_MULT", "predatordamage", 0.25, 3.0),
+        ("DH_ELO_PREDATOR_HEALTH_MULT", "predatorhealth", 0.25, 3.0),
+        ("DH_ELO_PLAYER_MELEE_MULT", "playermeleedamage", 0.5, 2.0),
+        ("DH_ELO_PLAYER_RANGED_MULT", "playerrangedamage", 0.25, 1.0),
+    ]
+    out = {}
+    for env_key, api_key, lo, hi in rows:
+        raw = os.environ.get(env_key, "").strip()
+        if not raw:
+            continue
+        snapped = _snap_elo_grid(raw.replace(",", "."), lo, hi, 0.25)
+        if snapped is None:
+            continue
+        out[api_key] = snapped
+    return out if out else None
+
+
 # Function to attach to the process and inject scripts
 def _elo_balance_script_prefix(session_id):
     lines = []
@@ -362,46 +402,10 @@ def _elo_balance_script_prefix(session_id):
     no_fb = os.environ.get("DH_ELO_BALANCE_DISABLE_FALLBACK", "").strip().lower()
     if no_fb in ("1", "true", "yes", "on"):
         lines.append("globalThis.__DH_ELO_BALANCE_DISABLE_FALLBACK = true;\n")
-    # Ближний бой игроков (elo playermeleedamage): тест ×2 или явный множитель.
-    pmelee_test = os.environ.get("DH_ELO_PLAYER_MELEE_TEST", "").strip().lower()
-    if pmelee_test in ("1", "true", "yes", "on"):
-        lines.append("globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT = 2;\n")
-        lines.append("globalThis.__DH_ELO_PLAYER_MELEE_ENV_SOURCE = 'env_test_x2';\n")
-    else:
-        pmelee_raw = os.environ.get("DH_ELO_PLAYER_MELEE_MULT", "").strip()
-        if pmelee_raw:
-            try:
-                pv = float(pmelee_raw)
-                if pv > 0:
-                    lines.append(
-                        "globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT = %s;\n"
-                        % json.dumps(pv)
-                    )
-                    lines.append(
-                        "globalThis.__DH_ELO_PLAYER_MELEE_ENV_SOURCE = 'env_mult';\n"
-                    )
-            except ValueError:
-                pass
-    # Дальнобой лук/пистолет/мушкет (elo playerrangedamage): тест ×0.25 или явный множитель 0.25–1.
-    pranged_test = os.environ.get("DH_ELO_PLAYER_RANGED_TEST", "").strip().lower()
-    if pranged_test in ("1", "true", "yes", "on"):
-        lines.append("globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT = 0.25;\n")
-        lines.append("globalThis.__DH_ELO_PLAYER_RANGED_ENV_SOURCE = 'env_test_025';\n")
-    else:
-        pranged_raw = os.environ.get("DH_ELO_PLAYER_RANGED_MULT", "").strip()
-        if pranged_raw:
-            try:
-                pv = float(pranged_raw)
-                if 0 < pv <= 1:
-                    lines.append(
-                        "globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT = %s;\n"
-                        % json.dumps(pv)
-                    )
-                    lines.append(
-                        "globalThis.__DH_ELO_PLAYER_RANGED_ENV_SOURCE = 'env_mult';\n"
-                    )
-            except ValueError:
-                pass
+    manual_mods = _parse_elo_manual_modifiers_from_env()
+    if manual_mods:
+        lines.append("globalThis.__DH_ELO_MANUAL_MODIFIERS = %s;\n" % json.dumps(manual_mods))
+        lines.append("globalThis.__DH_ELO_MANUAL_OVERRIDE = true;\n")
     return "".join(lines)
 
 
@@ -422,8 +426,7 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
                 for lib_name in (
                     "predator_damage_lib.js",
                     "predator_health_lib.js",
-                    "player_melee_damage_lib.js",
-                    "player_ranged_damage_lib.js",
+                    "player_weapon_damage_lib.js",
                 ):
                     lib_path = resolve_script_path(
                         "patches/technical/elo_balance_modifiers/" + lib_name

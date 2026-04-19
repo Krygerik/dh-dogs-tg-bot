@@ -1,21 +1,28 @@
 'use strict';
 
 /**
- * Множитель урона дальнобоя игроков (лук / пистолет / мушкет и их снаряды): globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT.
- * Только ослабление (≤1). Любая цель (игрок, хищник, …): корректируется итоговый float урона в ADH_Character::AdjustDamage.
+ * Один хук ADH_Character::AdjustDamage для урона игроков-людей: дальнобой и ближний регулируются
+ * РАЗНЫМИ глобалами (__DH_PLAYER_RANGED_DAMAGE_MULT vs __DH_PLAYER_MELEE_DAMAGE_MULT), без двойного attach.
+ * Сначала проверка «строгий» дальнобой (лук/пистолет/мушкет) → только ranged mult; иначе ближний → только melee mult.
  */
 
-function installPlayerRangedDamageHooks(base) {
-  if (globalThis.__DH_PLAYER_RANGED_DMG_INSTALLED) {
+function installPlayerWeaponDamageHooks(base) {
+  if (globalThis.__DH_PLAYER_WEAPON_DMG_INSTALLED) {
     return;
   }
-  globalThis.__DH_PLAYER_RANGED_DMG_INSTALLED = true;
+  globalThis.__DH_PLAYER_WEAPON_DMG_INSTALLED = true;
 
   if (!base) {
-    throw new Error('[player_ranged_dmg] installPlayerRangedDamageHooks: base is null');
+    throw new Error('[player_weapon_dmg] installPlayerWeaponDamageHooks: base is null');
   }
 
-  function effectiveMult() {
+  function effectiveMeleeMult() {
+    const v = globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT;
+    if (typeof v === 'number' && v > 0 && Number.isFinite(v)) return v;
+    return 1;
+  }
+
+  function effectiveRangedMult() {
     const v = globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT;
     if (typeof v === 'number' && v > 0 && Number.isFinite(v)) return v;
     return 1;
@@ -92,10 +99,8 @@ function installPlayerRangedDamageHooks(base) {
     return cls.indexOf('HumanCharacter') >= 0 || cls.indexOf('DH_HumanCharacter') >= 0;
   }
 
-  /**
-   * Лук, пистолет, мушкет и типичные снаряды (без гарпуна и прочего огнестрела).
-   */
-  function isBowPistolMusketDamageCauser(actor) {
+  /** Лук / пистолет / мушкет и их снаряды — только __DH_PLAYER_RANGED_DAMAGE_MULT. */
+  function isStrictRangedBowPistolMusket(actor) {
     if (!actor || actor.isNull()) return false;
     const c = getClassName(actor);
     if (!c) return false;
@@ -112,6 +117,23 @@ function installPlayerRangedDamageHooks(base) {
       if (u.indexOf('bullet') >= 0 || u.indexOf('ball') >= 0) return true;
       if (u.indexOf('musket') >= 0 || u.indexOf('pistol') >= 0) return true;
     }
+    return false;
+  }
+
+  /**
+   * Широкий класс «не ближний» (как раньше в melee_lib): если true — melee mult не применяем.
+   */
+  function isBroadRangedOrNonMeleeWeapon(actor) {
+    if (!actor || actor.isNull()) return false;
+    const c = getClassName(actor);
+    if (!c) return false;
+    const u = c.toLowerCase();
+    if (u.indexOf('projectile') >= 0) return true;
+    if (u.indexOf('gun') >= 0 && u.indexOf('flung') < 0) return true;
+    if (u.indexOf('musket') >= 0 || u.indexOf('flintlock') >= 0 || u.indexOf('rifle') >= 0) return true;
+    if (u.indexOf('pistol') >= 0 || u.indexOf('powder') >= 0) return true;
+    if (u.indexOf('bow') >= 0 && u.indexOf('elbow') < 0) return true;
+    if (u.indexOf('harpoon') >= 0 && u.indexOf('gun') >= 0) return true;
     return false;
   }
 
@@ -133,15 +155,21 @@ function installPlayerRangedDamageHooks(base) {
         if (!pawn || !isHumanPlayerPawn(pawn) || isPredatorLikePawn(pawn)) {
           return;
         }
-        if (!damageCauser || damageCauser.isNull() || !isBowPistolMusketDamageCauser(damageCauser)) {
+
+        let mult = 1;
+        if (damageCauser && !damageCauser.isNull() && isStrictRangedBowPistolMusket(damageCauser)) {
+          mult = effectiveRangedMult();
+        } else if (!damageCauser || damageCauser.isNull() || !isBroadRangedOrNonMeleeWeapon(damageCauser)) {
+          mult = effectiveMeleeMult();
+        } else {
           return;
         }
+
         try {
           const d = damagePtr.readFloat();
           if (!(d > 0) || Number.isNaN(d)) return;
-          const m = effectiveMult();
-          if (Math.abs(m - 1) < 1e-6) return;
-          damagePtr.writeFloat(d * m);
+          if (Math.abs(mult - 1) < 1e-6) return;
+          damagePtr.writeFloat(d * mult);
         } catch (_e) {}
       },
     });
