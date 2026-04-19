@@ -382,6 +382,26 @@ def _elo_balance_script_prefix(session_id):
                     )
             except ValueError:
                 pass
+    # Дальнобой лук/пистолет/мушкет (elo playerrangedamage): тест ×0.25 или явный множитель 0.25–1.
+    pranged_test = os.environ.get("DH_ELO_PLAYER_RANGED_TEST", "").strip().lower()
+    if pranged_test in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT = 0.25;\n")
+        lines.append("globalThis.__DH_ELO_PLAYER_RANGED_ENV_SOURCE = 'env_test_025';\n")
+    else:
+        pranged_raw = os.environ.get("DH_ELO_PLAYER_RANGED_MULT", "").strip()
+        if pranged_raw:
+            try:
+                pv = float(pranged_raw)
+                if 0 < pv <= 1:
+                    lines.append(
+                        "globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT = %s;\n"
+                        % json.dumps(pv)
+                    )
+                    lines.append(
+                        "globalThis.__DH_ELO_PLAYER_RANGED_ENV_SOURCE = 'env_mult';\n"
+                    )
+            except ValueError:
+                pass
     return "".join(lines)
 
 
@@ -403,6 +423,7 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
                     "predator_damage_lib.js",
                     "predator_health_lib.js",
                     "player_melee_damage_lib.js",
+                    "player_ranged_damage_lib.js",
                 ):
                     lib_path = resolve_script_path(
                         "patches/technical/elo_balance_modifiers/" + lib_name

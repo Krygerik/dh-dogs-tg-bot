@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * Elo-баланс: predatordamage / predatorhealth / playermeleedamage (API /stats/elo-balance).
- * Множители из ответа API; ближний бой игроков — отдельная сетка [0.5, 2], шаг 0.25.
- * Переопределения: globalThis.__DH_ELO_PLAYER_MELEE_FORCE; env через prefix (см. loader.py).
+ * Elo-баланс: predatordamage / predatorhealth / playermeleedamage / playerrangedamage (API /stats/elo-balance).
+ * Ближний бой [0.5, 2]; дальнобой лук/пистолет/мушкет только [0.25, 1], шаг 0.25.
+ * Переопределения: __DH_ELO_PLAYER_MELEE_FORCE, __DH_ELO_PLAYER_RANGED_FORCE; env — loader.py.
  * Thrall: ReceiveThrallMessage + PlayerArray, SetPlayerRole, AddStartingInventory.
  */
 
@@ -166,6 +166,12 @@ if (base === null) {
     return Math.abs(n - 1) < 1e-4;
   }
 
+  function isNeutralPlayerRangedMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return true;
+    return Math.abs(n - 1) < 1e-4;
+  }
+
   function buildFTextFromMessageLine(line) {
     const FName_FName = new NativeFunction(base.add(RVA_FNAME_FNAME), 'void', ['pointer', 'pointer', 'int8'], 'win64');
     const FText_FromName = new NativeFunction(base.add(RVA_FTEXT_FROM_NAME), 'pointer', ['pointer', 'pointer'], 'win64');
@@ -273,7 +279,7 @@ if (base === null) {
     });
   }
 
-  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult, meleeMult) {
+  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult, meleeMult, rangedMult) {
     const lines = [];
     if (!isNeutralPredatorMult(dmgMult)) {
       lines.push(
@@ -286,6 +292,11 @@ if (base === null) {
     if (!isNeutralPlayerMeleeMult(meleeMult)) {
       lines.push(
         'Урон ближнего боя игроков в этой игре: ' + formatMultDisplay(meleeMult) + 'x.'
+      );
+    }
+    if (!isNeutralPlayerRangedMult(rangedMult)) {
+      lines.push(
+        'Урон лука, пистолета и мушкета в этой игре: ' + formatMultDisplay(rangedMult) + 'x.'
       );
     }
     globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
@@ -371,11 +382,65 @@ if (base === null) {
     );
   }
 
+  /** Сетка [0.25, 1], шаг 0.25 — только снижение дальнобоя (лук / пистолет / мушкет). */
+  const PR_MULT_MIN = 0.25;
+  const PR_MULT_MAX = 1;
+  const PR_MULT_STEP = 0.25;
+
+  function snapPlayerRangedMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      return 1;
+    }
+    const q = Math.round(n / PR_MULT_STEP) * PR_MULT_STEP;
+    if (q < PR_MULT_MIN) return PR_MULT_MIN;
+    if (q > PR_MULT_MAX) return PR_MULT_MAX;
+    return q;
+  }
+
+  /**
+   * Приоритет (отдельный source= в логе):
+   * 1) __DH_ELO_PLAYER_RANGED_FORCE;
+   * 2) env (DH_ELO_PLAYER_RANGED_TEST ×0.25 или DH_ELO_PLAYER_RANGED_MULT);
+   * 3) modifiers.playerrangeddamage из API;
+   * 4) ×1.
+   */
+  function applyPlayerRangedDamageFromModifiers(modifiers) {
+    const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    let mult = 1;
+    let source = 'default';
+
+    if (
+      typeof globalThis.__DH_ELO_PLAYER_RANGED_FORCE === 'number' &&
+      Number.isFinite(globalThis.__DH_ELO_PLAYER_RANGED_FORCE) &&
+      globalThis.__DH_ELO_PLAYER_RANGED_FORCE > 0
+    ) {
+      mult = snapPlayerRangedMult(globalThis.__DH_ELO_PLAYER_RANGED_FORCE);
+      source = 'global_force';
+    } else if (
+      typeof globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT === 'number' &&
+      Number.isFinite(globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT) &&
+      globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT > 0
+    ) {
+      mult = snapPlayerRangedMult(globalThis.__DH_ELO_PLAYER_RANGED_ENV_MULT);
+      source = String(globalThis.__DH_ELO_PLAYER_RANGED_ENV_SOURCE || 'env');
+    } else if (typeof m.playerrangeddamage === 'number' && Number.isFinite(m.playerrangeddamage)) {
+      mult = snapPlayerRangedMult(m.playerrangeddamage);
+      source = 'api_elo_balance';
+    }
+
+    globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT = mult;
+    logLine(
+      'player_ranged_damage mult=' + formatMultDisplay(mult) + ' source=' + source
+    );
+  }
+
   function applyModifiersStub(modifiers) {
     const m = modifiers || {};
     applyPredatorDamageMultiplierFromModifiers(m);
     applyPredatorHealthMultiplierFromModifiers(m);
     applyPlayerMeleeDamageFromModifiers(m);
+    applyPlayerRangedDamageFromModifiers(m);
   }
 
   /** SOLO_TEST: без подмешивания фиксированных множителей — только ответ API. */
@@ -469,7 +534,8 @@ if (base === null) {
         gameStatePtr,
         globalThis.__DH_PREDATOR_DAMAGE_MULT,
         globalThis.__DH_PREDATOR_HP_MULT,
-        globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT
+        globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT,
+        globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT
       );
       scheduleThrallNoticeRetries(gameModePtr);
       logLine(
@@ -479,6 +545,8 @@ if (base === null) {
           formatMultDisplay(globalThis.__DH_PREDATOR_HP_MULT) +
           ' playermeleedamage=' +
           formatMultDisplay(globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT) +
+          ' playerrangeddamage=' +
+          formatMultDisplay(globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT) +
           ' trigger=' +
           (trigger || 'OnPokerRoundEnded')
       );
@@ -501,6 +569,7 @@ if (base === null) {
                 ? m.predatorhealth
                 : globalThis.__DH_PREDATOR_HP_MULT,
             playermeleedamage: globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT,
+            playerrangeddamage: globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT,
           },
         });
       }
@@ -561,6 +630,7 @@ if (base === null) {
 globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
 globalThis.__DH_PREDATOR_HP_MULT = 1;
 globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT = 1;
+globalThis.__DH_PLAYER_RANGED_DAMAGE_MULT = 1;
 if (typeof installPredatorDamageHooks === 'function') {
   installPredatorDamageHooks(base);
 }
@@ -569,4 +639,7 @@ if (typeof installPredatorHealthHooks === 'function') {
 }
 if (typeof installPlayerMeleeDamageHooks === 'function') {
   installPlayerMeleeDamageHooks(base);
+}
+if (typeof installPlayerRangedDamageHooks === 'function') {
+  installPlayerRangedDamageHooks(base);
 }

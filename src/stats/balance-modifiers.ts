@@ -1,5 +1,5 @@
 /**
- * Elo-баланс: predatordamage, predatorhealth, playermeleedamage.
+ * Elo-баланс: predatordamage, predatorhealth, playermeleedamage, playerrangeddamage.
  *
  * Классический режим: 8 игроков — 6 мирных (crew) и 2 предателя (thrall).
  * Сравнение команд: средний рейтинг (avgCrew vs avgThrall).
@@ -14,6 +14,9 @@
  *
  * playermeleedamage [0.5, 2], шаг 0.25, нейтраль 1 — отдельно от бюджета T:
  * выше 1 при преимуществе мирных по рейтингу, ниже 1 при преимуществе предателей.
+ *
+ * playerrangedamage [0.25, 1], шаг 0.25, нейтраль 1 — только ослабление дальнобоя игроков (лук/пистолет/мушкет);
+ * активируется при diff < 0 и суммарном весе T ≥ ELO_MIN_WEIGHT_UNITS_FOR_PLAYER_RANGED (усиление мирных при отставании по рейтингу).
  */
 
 export const ELO_CLASSIC_CREW_TEAM_SIZE = 6;
@@ -40,7 +43,19 @@ export const ELO_PLAYER_MELEE_MULT_MIN = 0.5;
 export const ELO_PLAYER_MELEE_MULT_MAX = 2;
 export const ELO_PLAYER_MELEE_MULT_STEP = 0.25;
 
-export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth', 'playermeleedamage'] as const;
+export const ELO_PLAYER_RANGED_MULT_MIN = 0.25;
+export const ELO_PLAYER_RANGED_MULT_MAX = 1;
+export const ELO_PLAYER_RANGED_MULT_STEP = 0.25;
+
+/** Минимальный суммарный вес T (из |avgCrew−avgThrall|), при котором включается снижение дальнобоя. */
+export const ELO_MIN_WEIGHT_UNITS_FOR_PLAYER_RANGED = 1;
+
+export const ELO_BALANCE_MODIFIER_KEYS = [
+  'predatordamage',
+  'predatorhealth',
+  'playermeleedamage',
+  'playerrangeddamage'
+] as const;
 
 export type EloBalanceModifierKey = (typeof ELO_BALANCE_MODIFIER_KEYS)[number];
 
@@ -82,6 +97,38 @@ export function computePlayerMeleeDamageFromRatingDiff(
   const t = clamp(diff / scale, -1, 1);
   const rawLinear = 1.25 + t * 0.75;
   return quantizePlayerMeleeMultiplier(rawLinear);
+}
+
+/** Сетка [0.25, 1], шаг 0.25 — только снижение урона дальнобоя игроков (лук/пистолет/мушкет). */
+export function quantizePlayerRangedMultiplier(raw: number): number {
+  const q = Math.round(raw / ELO_PLAYER_RANGED_MULT_STEP) * ELO_PLAYER_RANGED_MULT_STEP;
+  return clamp(q, ELO_PLAYER_RANGED_MULT_MIN, ELO_PLAYER_RANGED_MULT_MAX);
+}
+
+/**
+ * Дальнобой: только mult ≤ 1. При diff = avgCrew − avgThrall < 0 (мирные слабее по рейтингу) — снижаем урон;
+ * при T < минимума — без эффекта (1).
+ */
+export function computePlayerRangedDamageFromRatingDiff(
+  diff: number,
+  initialRating: number,
+  crewCount: number,
+  thrallCount: number,
+  totalWeightUnits: number
+): number {
+  if (crewCount === 0 || thrallCount === 0) {
+    return quantizePlayerRangedMultiplier(1);
+  }
+  if (diff >= -1e-9) {
+    return quantizePlayerRangedMultiplier(1);
+  }
+  if (totalWeightUnits < ELO_MIN_WEIGHT_UNITS_FOR_PLAYER_RANGED) {
+    return quantizePlayerRangedMultiplier(1);
+  }
+  const scale = Math.max(initialRating, 1) * 3;
+  const t = clamp(diff / scale, -1, 0);
+  const rawLinear = 1 + t * 0.75;
+  return quantizePlayerRangedMultiplier(rawLinear);
 }
 
 export type EloBalanceInputPlayer = {
@@ -216,6 +263,14 @@ export function computeEloBalanceModifiers(
   const diff = avgCrew - avgThrall;
   const isClassicRoster = isClassicEightPlayerRoster(players);
 
+  const baseUnitsEarly =
+    crewCount === 0 || thrallCount === 0 ? 0 : Math.floor(Math.abs(diff) / ratingDiffPerUnit);
+  const rosterFactorEarly = isClassicRoster ? 1 : nonClassicMult;
+  const preTotalWeightUnits = Math.min(
+    maxTotalWeightUnits,
+    Math.max(0, Math.floor(baseUnitsEarly * rosterFactorEarly))
+  );
+
   const neutral = quantizePredatorMultiplier(1);
   const modifiers: Record<EloBalanceModifierKey, number> = {
     predatordamage: neutral,
@@ -225,6 +280,13 @@ export function computeEloBalanceModifiers(
       initial,
       crewCount,
       thrallCount
+    ),
+    playerrangeddamage: computePlayerRangedDamageFromRatingDiff(
+      diff,
+      initial,
+      crewCount,
+      thrallCount,
+      preTotalWeightUnits
     ),
   };
 
@@ -315,6 +377,13 @@ export function computeEloBalanceModifiers(
     initial,
     crewCount,
     thrallCount
+  );
+  modifiers.playerrangeddamage = computePlayerRangedDamageFromRatingDiff(
+    diff,
+    initial,
+    crewCount,
+    thrallCount,
+    totalWeightUnits
   );
 
   return {
