@@ -1,5 +1,5 @@
 /**
- * Elo-баланс: predatordamage, predatorhealth.
+ * Elo-баланс: predatordamage, predatorhealth, playermeleedamage.
  *
  * Классический режим: 8 игроков — 6 мирных (crew) и 2 предателя (thrall).
  * Сравнение команд: средний рейтинг (avgCrew vs avgThrall).
@@ -8,9 +8,12 @@
  * разницы |avgCrew − avgThrall| (floor), опционально множитель для неклассики — см. опции,
  * по умолчанию как у классического 6+2, сверху — maxTotalWeightUnits.
  *
- * Суммарный вес случайно распределяется между модификаторами:
+ * Суммарный вес случайно распределяется между модификаторами predatordamage / predatorhealth:
  * 1 ед. веса = шаг 0.25 по урону; 3 ед. = шаг 0.25 по HP.
  * Урон/HP: [0.25, 3], шаг 0.25.
+ *
+ * playermeleedamage [0.5, 2], шаг 0.25, нейтраль 1 — отдельно от бюджета T:
+ * выше 1 при преимуществе мирных по рейтингу, ниже 1 при преимуществе предателей.
  */
 
 export const ELO_CLASSIC_CREW_TEAM_SIZE = 6;
@@ -33,7 +36,11 @@ export const ELO_RATING_DIFF_PER_WEIGHT_UNIT = 5;
 /** Множитель веса для неклассического состава (по умолчанию 1 — как у классического 6+2). */
 export const ELO_NON_CLASSIC_ROSTER_WEIGHT_MULTIPLIER = 1;
 
-export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth'] as const;
+export const ELO_PLAYER_MELEE_MULT_MIN = 0.5;
+export const ELO_PLAYER_MELEE_MULT_MAX = 2;
+export const ELO_PLAYER_MELEE_MULT_STEP = 0.25;
+
+export const ELO_BALANCE_MODIFIER_KEYS = ['predatordamage', 'predatorhealth', 'playermeleedamage'] as const;
 
 export type EloBalanceModifierKey = (typeof ELO_BALANCE_MODIFIER_KEYS)[number];
 
@@ -47,6 +54,34 @@ function clamp(n: number, min: number, max: number): number {
 export function quantizePredatorMultiplier(raw: number): number {
   const q = Math.round(raw / ELO_PREDATOR_MULT_STEP) * ELO_PREDATOR_MULT_STEP;
   return clamp(q, ELO_PREDATOR_MULT_MIN, ELO_PREDATOR_MULT_MAX);
+}
+
+/** Сетка [0.5, 2], шаг 0.25 — урон ближнего боя игроков (отдельно от бюджета веса T). */
+export function quantizePlayerMeleeMultiplier(raw: number): number {
+  const q = Math.round(raw / ELO_PLAYER_MELEE_MULT_STEP) * ELO_PLAYER_MELEE_MULT_STEP;
+  return clamp(q, ELO_PLAYER_MELEE_MULT_MIN, ELO_PLAYER_MELEE_MULT_MAX);
+}
+
+/**
+ * Множитель ближнего боя: diff = avgCrew − avgThrall (по рейтингу).
+ * diff > 0 → мирные сильнее → mult > 1; diff < 0 → предатели сильнее → mult < 1.
+ */
+export function computePlayerMeleeDamageFromRatingDiff(
+  diff: number,
+  initialRating: number,
+  crewCount: number,
+  thrallCount: number
+): number {
+  if (crewCount === 0 || thrallCount === 0) {
+    return quantizePlayerMeleeMultiplier(1);
+  }
+  if (Math.abs(diff) < 1e-9) {
+    return quantizePlayerMeleeMultiplier(1);
+  }
+  const scale = Math.max(initialRating, 1) * 3;
+  const t = clamp(diff / scale, -1, 1);
+  const rawLinear = 1.25 + t * 0.75;
+  return quantizePlayerMeleeMultiplier(rawLinear);
 }
 
 export type EloBalanceInputPlayer = {
@@ -185,6 +220,12 @@ export function computeEloBalanceModifiers(
   const modifiers: Record<EloBalanceModifierKey, number> = {
     predatordamage: neutral,
     predatorhealth: neutral,
+    playermeleedamage: computePlayerMeleeDamageFromRatingDiff(
+      diff,
+      initial,
+      crewCount,
+      thrallCount
+    ),
   };
 
   let strengthRatio = 1;
@@ -269,6 +310,12 @@ export function computeEloBalanceModifiers(
   const step = ELO_PREDATOR_MULT_STEP;
   modifiers.predatordamage = quantizePredatorMultiplier(1 + direction * damageGridSteps * step);
   modifiers.predatorhealth = quantizePredatorMultiplier(1 + direction * hpGridSteps * step);
+  modifiers.playermeleedamage = computePlayerMeleeDamageFromRatingDiff(
+    diff,
+    initial,
+    crewCount,
+    thrallCount
+  );
 
   return {
     modifiers,

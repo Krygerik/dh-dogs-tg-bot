@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * Elo-баланс: predatordamage / predatorhealth (API /stats/elo-balance).
- * Множители только из ответа API (в dev рейтинги мокаются на стороне бота, не здесь).
+ * Elo-баланс: predatordamage / predatorhealth / playermeleedamage (API /stats/elo-balance).
+ * Множители из ответа API; ближний бой игроков — отдельная сетка [0.5, 2], шаг 0.25.
+ * Переопределения: globalThis.__DH_ELO_PLAYER_MELEE_FORCE; env через prefix (см. loader.py).
  * Thrall: ReceiveThrallMessage + PlayerArray, SetPlayerRole, AddStartingInventory.
  */
 
@@ -159,6 +160,12 @@ if (base === null) {
     return Math.abs(n - 1) < 1e-4;
   }
 
+  function isNeutralPlayerMeleeMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return true;
+    return Math.abs(n - 1) < 1e-4;
+  }
+
   function buildFTextFromMessageLine(line) {
     const FName_FName = new NativeFunction(base.add(RVA_FNAME_FNAME), 'void', ['pointer', 'pointer', 'int8'], 'win64');
     const FText_FromName = new NativeFunction(base.add(RVA_FTEXT_FROM_NAME), 'pointer', ['pointer', 'pointer'], 'win64');
@@ -266,7 +273,7 @@ if (base === null) {
     });
   }
 
-  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult) {
+  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult, meleeMult) {
     const lines = [];
     if (!isNeutralPredatorMult(dmgMult)) {
       lines.push(
@@ -275,6 +282,11 @@ if (base === null) {
     }
     if (!isNeutralPredatorMult(hpMult)) {
       lines.push('Здоровье хищников в этой игре: ' + formatMultDisplay(hpMult) + 'x.');
+    }
+    if (!isNeutralPlayerMeleeMult(meleeMult)) {
+      lines.push(
+        'Урон ближнего боя игроков в этой игре: ' + formatMultDisplay(meleeMult) + 'x.'
+      );
     }
     globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
     broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr);
@@ -306,10 +318,64 @@ if (base === null) {
     globalThis.__DH_PREDATOR_HP_MULT = snapPredatorMult(raw);
   }
 
+  /** Сетка как в API: [0.5, 2], шаг 0.25 — урон ближнего боя игроков. */
+  const PM_MULT_MIN = 0.5;
+  const PM_MULT_MAX = 2;
+  const PM_MULT_STEP = 0.25;
+
+  function snapPlayerMeleeMult(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      return 1;
+    }
+    const q = Math.round(n / PM_MULT_STEP) * PM_MULT_STEP;
+    if (q < PM_MULT_MIN) return PM_MULT_MIN;
+    if (q > PM_MULT_MAX) return PM_MULT_MAX;
+    return q;
+  }
+
+  /**
+   * Приоритет (каждый итог логируется отдельным source=):
+   * 1) __DH_ELO_PLAYER_MELEE_FORCE — ручное переопределение в Frida;
+   * 2) env из prefix (DH_ELO_PLAYER_MELEE_TEST ×2 или DH_ELO_PLAYER_MELEE_MULT);
+   * 3) modifiers.playermeleedamage из API;
+   * 4) ×1 по умолчанию.
+   */
+  function applyPlayerMeleeDamageFromModifiers(modifiers) {
+    const m = modifiers && typeof modifiers === 'object' ? modifiers : {};
+    let mult = 1;
+    let source = 'default';
+
+    if (
+      typeof globalThis.__DH_ELO_PLAYER_MELEE_FORCE === 'number' &&
+      Number.isFinite(globalThis.__DH_ELO_PLAYER_MELEE_FORCE) &&
+      globalThis.__DH_ELO_PLAYER_MELEE_FORCE > 0
+    ) {
+      mult = snapPlayerMeleeMult(globalThis.__DH_ELO_PLAYER_MELEE_FORCE);
+      source = 'global_force';
+    } else if (
+      typeof globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT === 'number' &&
+      Number.isFinite(globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT) &&
+      globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT > 0
+    ) {
+      mult = snapPlayerMeleeMult(globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT);
+      source = String(globalThis.__DH_ELO_PLAYER_MELEE_ENV_SOURCE || 'env');
+    } else if (typeof m.playermeleedamage === 'number' && Number.isFinite(m.playermeleedamage)) {
+      mult = snapPlayerMeleeMult(m.playermeleedamage);
+      source = 'api_elo_balance';
+    }
+
+    globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT = mult;
+    logLine(
+      'player_melee_damage mult=' + formatMultDisplay(mult) + ' source=' + source
+    );
+  }
+
   function applyModifiersStub(modifiers) {
     const m = modifiers || {};
     applyPredatorDamageMultiplierFromModifiers(m);
     applyPredatorHealthMultiplierFromModifiers(m);
+    applyPlayerMeleeDamageFromModifiers(m);
   }
 
   /** SOLO_TEST: без подмешивания фиксированных множителей — только ответ API. */
@@ -402,7 +468,8 @@ if (base === null) {
       setPredatorThrallNoticeAndTryDeliver(
         gameStatePtr,
         globalThis.__DH_PREDATOR_DAMAGE_MULT,
-        globalThis.__DH_PREDATOR_HP_MULT
+        globalThis.__DH_PREDATOR_HP_MULT,
+        globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT
       );
       scheduleThrallNoticeRetries(gameModePtr);
       logLine(
@@ -410,6 +477,8 @@ if (base === null) {
           formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) +
           ' predatorhealth=' +
           formatMultDisplay(globalThis.__DH_PREDATOR_HP_MULT) +
+          ' playermeleedamage=' +
+          formatMultDisplay(globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT) +
           ' trigger=' +
           (trigger || 'OnPokerRoundEnded')
       );
@@ -431,6 +500,7 @@ if (base === null) {
               typeof m.predatorhealth === 'number' && Number.isFinite(m.predatorhealth)
                 ? m.predatorhealth
                 : globalThis.__DH_PREDATOR_HP_MULT,
+            playermeleedamage: globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT,
           },
         });
       }
@@ -490,9 +560,13 @@ if (base === null) {
 
 globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
 globalThis.__DH_PREDATOR_HP_MULT = 1;
+globalThis.__DH_PLAYER_MELEE_DAMAGE_MULT = 1;
 if (typeof installPredatorDamageHooks === 'function') {
   installPredatorDamageHooks(base);
 }
 if (typeof installPredatorHealthHooks === 'function') {
   installPredatorHealthHooks(base);
+}
+if (typeof installPlayerMeleeDamageHooks === 'function') {
+  installPlayerMeleeDamageHooks(base);
 }

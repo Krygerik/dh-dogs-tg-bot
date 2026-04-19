@@ -362,6 +362,26 @@ def _elo_balance_script_prefix(session_id):
     no_fb = os.environ.get("DH_ELO_BALANCE_DISABLE_FALLBACK", "").strip().lower()
     if no_fb in ("1", "true", "yes", "on"):
         lines.append("globalThis.__DH_ELO_BALANCE_DISABLE_FALLBACK = true;\n")
+    # Ближний бой игроков (elo playermeleedamage): тест ×2 или явный множитель.
+    pmelee_test = os.environ.get("DH_ELO_PLAYER_MELEE_TEST", "").strip().lower()
+    if pmelee_test in ("1", "true", "yes", "on"):
+        lines.append("globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT = 2;\n")
+        lines.append("globalThis.__DH_ELO_PLAYER_MELEE_ENV_SOURCE = 'env_test_x2';\n")
+    else:
+        pmelee_raw = os.environ.get("DH_ELO_PLAYER_MELEE_MULT", "").strip()
+        if pmelee_raw:
+            try:
+                pv = float(pmelee_raw)
+                if pv > 0:
+                    lines.append(
+                        "globalThis.__DH_ELO_PLAYER_MELEE_ENV_MULT = %s;\n"
+                        % json.dumps(pv)
+                    )
+                    lines.append(
+                        "globalThis.__DH_ELO_PLAYER_MELEE_ENV_SOURCE = 'env_mult';\n"
+                    )
+            except ValueError:
+                pass
     return "".join(lines)
 
 
@@ -382,6 +402,7 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
                 for lib_name in (
                     "predator_damage_lib.js",
                     "predator_health_lib.js",
+                    "player_melee_damage_lib.js",
                 ):
                     lib_path = resolve_script_path(
                         "patches/technical/elo_balance_modifiers/" + lib_name
