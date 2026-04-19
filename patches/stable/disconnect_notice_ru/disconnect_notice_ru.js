@@ -1,5 +1,6 @@
 /**
  * Уведомления об отключениях и смерти (RU). Win64 DreadHungerServer-Win64-Shipping.
+ * Отключение: одна строка «<имя> <роль> отключился».
  * Хуки: SetIsDisconnected, AGameSession::KickPlayer, UDH_OnlineSession::OnPlayerLogout.
  */
 var base = Process.getModuleByName('DreadHungerServer-Win64-Shipping.exe').base;
@@ -45,16 +46,6 @@ function takePending(playerState) {
     var r = pendingDisconnectReason[key];
     delete pendingDisconnectReason[key];
     return r;
-}
-
-function disconnectActionText(reason) {
-    if (reason === 'kick') {
-        return 'отключён сервером (кик)';
-    }
-    if (reason === 'logout') {
-        return 'вышел из игры (logout)';
-    }
-    return 'потеря связи или аварийное отключение';
 }
 
 function GetGameState() {
@@ -196,11 +187,10 @@ function SendDeathMessage(PlayerState) {
     }
 }
 
-function SendDisconnectedMessage(PlayerState, reason) {
+function SendDisconnectedMessage(PlayerState) {
     var rolename = getPlayerRoleName(PlayerState);
     var playername = getPlayerUserName(PlayerState);
-    var action = disconnectActionText(reason);
-    var News = playername + ' (' + rolename + ') ' + action;
+    var News = playername + ' ' + rolename + ' отключился';
     var GameState = GetGameState();
     var PlayerController = NotifyPlayers(GameState);
     for (var i = 0; i < PlayerController.length; i++) {
@@ -238,8 +228,8 @@ if (DisconnectedNotice) {
             if (!disconnected) {
                 return;
             }
-            var reason = takePending(PlayerState);
-            SendDisconnectedMessage(PlayerState, reason);
+            takePending(PlayerState);
+            SendDisconnectedMessage(PlayerState);
         },
     });
 }
