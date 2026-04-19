@@ -415,7 +415,6 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           totalWeightUnits,
           damageGridSteps,
           hpGridSteps,
-          craftGridSteps,
           direction
         } = computeEloBalanceModifiers(playersForBalance, ratingByName, { initialRating });
         sendJson(res, 200, {
@@ -434,7 +433,6 @@ export function createApiServer(config: ServerConfig, serverManager: ServerManag
           totalWeightUnits,
           damageGridSteps,
           hpGridSteps,
-          craftGridSteps,
           direction,
           devRatingMock: useDevClassicMock,
           balanceRequestPlayerCount: players.length,

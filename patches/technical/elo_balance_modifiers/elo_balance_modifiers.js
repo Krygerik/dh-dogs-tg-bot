@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Elo-баланс: predatordamage / predatorhealth / craftspeed (API /stats/elo-balance).
+ * Elo-баланс: predatordamage / predatorhealth (API /stats/elo-balance).
  * Множители только из ответа API (в dev рейтинги мокаются на стороне бота, не здесь).
  * Thrall: ReceiveThrallMessage + PlayerArray, SetPlayerRole, AddStartingInventory.
  */
@@ -266,7 +266,7 @@ if (base === null) {
     });
   }
 
-  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult, craftMult) {
+  function setPredatorThrallNoticeAndTryDeliver(gameStatePtr, dmgMult, hpMult) {
     const lines = [];
     if (!isNeutralPredatorMult(dmgMult)) {
       lines.push(
@@ -275,16 +275,6 @@ if (base === null) {
     }
     if (!isNeutralPredatorMult(hpMult)) {
       lines.push('Здоровье хищников в этой игре: ' + formatMultDisplay(hpMult) + 'x.');
-    }
-    if (!isNeutralPredatorMult(craftMult)) {
-      lines.push(
-        'Скорость крафта, лутания, разделывания и создания проектов в этой игре: ' +
-          formatMultDisplay(craftMult) +
-          'x.'
-      );
-    }
-    if (lines.length === 0) {
-      lines.push('Nothing happened');
     }
     globalThis.__DH_ELO_THRALL_NOTICE_LINES = lines;
     broadcastPredatorNoticeToAllPlayersInGameState(gameStatePtr);
@@ -295,11 +285,6 @@ if (base === null) {
   const PRED_MULT_MAX = 3;
   const PRED_MULT_STEP = 0.25;
 
-  /** Скорость крафта: [0.5, 2], шаг 0.25, нейтраль 1 (как в balance-modifiers). */
-  const CRAFT_MULT_MIN = 0.5;
-  const CRAFT_MULT_MAX = 2;
-  const CRAFT_MULT_STEP = 0.25;
-
   function snapPredatorMult(v) {
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) {
@@ -308,17 +293,6 @@ if (base === null) {
     const q = Math.round(n / PRED_MULT_STEP) * PRED_MULT_STEP;
     if (q < PRED_MULT_MIN) return PRED_MULT_MIN;
     if (q > PRED_MULT_MAX) return PRED_MULT_MAX;
-    return q;
-  }
-
-  function snapCraftMult(v) {
-    const n = Number(v);
-    if (!Number.isFinite(n) || n <= 0) {
-      return 1;
-    }
-    const q = Math.round(n / CRAFT_MULT_STEP) * CRAFT_MULT_STEP;
-    if (q < CRAFT_MULT_MIN) return CRAFT_MULT_MIN;
-    if (q > CRAFT_MULT_MAX) return CRAFT_MULT_MAX;
     return q;
   }
 
@@ -332,16 +306,10 @@ if (base === null) {
     globalThis.__DH_PREDATOR_HP_MULT = snapPredatorMult(raw);
   }
 
-  function applyCraftSpeedMultiplierFromModifiers(modifiers) {
-    const raw = modifiers && typeof modifiers.craftspeed === 'number' ? modifiers.craftspeed : 1;
-    globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT = snapCraftMult(raw);
-  }
-
   function applyModifiersStub(modifiers) {
     const m = modifiers || {};
     applyPredatorDamageMultiplierFromModifiers(m);
     applyPredatorHealthMultiplierFromModifiers(m);
-    applyCraftSpeedMultiplierFromModifiers(m);
   }
 
   /** SOLO_TEST: без подмешивания фиксированных множителей — только ответ API. */
@@ -434,8 +402,7 @@ if (base === null) {
       setPredatorThrallNoticeAndTryDeliver(
         gameStatePtr,
         globalThis.__DH_PREDATOR_DAMAGE_MULT,
-        globalThis.__DH_PREDATOR_HP_MULT,
-        globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT
+        globalThis.__DH_PREDATOR_HP_MULT
       );
       scheduleThrallNoticeRetries(gameModePtr);
       logLine(
@@ -443,8 +410,6 @@ if (base === null) {
           formatMultDisplay(globalThis.__DH_PREDATOR_DAMAGE_MULT) +
           ' predatorhealth=' +
           formatMultDisplay(globalThis.__DH_PREDATOR_HP_MULT) +
-          ' craftspeed=' +
-          formatMultDisplay(globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT) +
           ' trigger=' +
           (trigger || 'OnPokerRoundEnded')
       );
@@ -466,10 +431,6 @@ if (base === null) {
               typeof m.predatorhealth === 'number' && Number.isFinite(m.predatorhealth)
                 ? m.predatorhealth
                 : globalThis.__DH_PREDATOR_HP_MULT,
-            craftspeed:
-              typeof m.craftspeed === 'number' && Number.isFinite(m.craftspeed)
-                ? m.craftspeed
-                : globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT,
           },
         });
       }
@@ -529,13 +490,9 @@ if (base === null) {
 
 globalThis.__DH_PREDATOR_DAMAGE_MULT = 1;
 globalThis.__DH_PREDATOR_HP_MULT = 1;
-globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT = 1;
 if (typeof installPredatorDamageHooks === 'function') {
   installPredatorDamageHooks(base);
 }
 if (typeof installPredatorHealthHooks === 'function') {
   installPredatorHealthHooks(base);
-}
-if (typeof installWorkbenchCraftSpeedHooks === 'function') {
-  installWorkbenchCraftSpeedHooks(base);
 }

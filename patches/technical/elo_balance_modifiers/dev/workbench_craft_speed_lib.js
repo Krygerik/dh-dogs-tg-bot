@@ -1,19 +1,30 @@
 'use strict';
 
 /**
- * Множитель скорости крафта, лутания, разделывания и создания проектов (UDH_CraftingComponent).
- * globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT из elo-balance (craftspeed), нейтраль 1.
- * Масштабирование RemainingTime/TotalTime в конце UDH_CraftingComponent::TickComponent (и
- * UDH_WorkbenchRepairComponent::TickComponent при наличии символа). GroundCrafting не трогаем.
+ * DEV-ONLY: не подключается к elo_balance и не входит в списки модов клиента.
+ *
+ * Хук TickComponent на UDH_CraftingComponent — масштабирование времени крафта/лутания/
+ * разделывания/создания проектов. На проде отключено: ломает взаимодействия ролей
+ * (инженер, повар, охотник, капитан и др.).
+ *
+ * Включение: перед загрузкой скрипта выставить
+ *   globalThis.__DH_DEV_WORKBENCH_CRAFT_SPEED = true;
+ *   globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT = <число>;  // например 2
+ * либо собрать отдельный inject только с этим файлом + минимальный bootstrap.
+ *
+ * Множитель: globalThis.__DH_WORKBENCH_CRAFT_SPEED_MULT (нейтраль 1).
  */
 
 function installWorkbenchCraftSpeedHooks(base) {
   if (globalThis.__DH_WORKBENCH_CRAFT_INSTALLED) {
     return;
   }
+  if (globalThis.__DH_DEV_WORKBENCH_CRAFT_SPEED !== true) {
+    return;
+  }
 
   if (!base) {
-    throw new Error('[workbench_craft] installWorkbenchCraftSpeedHooks: base is null');
+    throw new Error('[workbench_craft][dev] installWorkbenchCraftSpeedHooks: base is null');
   }
 
   const OFF = {

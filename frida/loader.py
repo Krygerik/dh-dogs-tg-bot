@@ -382,7 +382,6 @@ def attach_to_process_and_inject_scripts(session, scripts, session_id=None):
                 for lib_name in (
                     "predator_damage_lib.js",
                     "predator_health_lib.js",
-                    "workbench_craft_speed_lib.js",
                 ):
                     lib_path = resolve_script_path(
                         "patches/technical/elo_balance_modifiers/" + lib_name
