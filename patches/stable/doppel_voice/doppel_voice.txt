@@ -1,0 +1,1 @@
+Doppelganger takes over the target's voice: voice bindings of the thrall and the target are swapped while the doppel lives. Antidote from the target kills the doppel.

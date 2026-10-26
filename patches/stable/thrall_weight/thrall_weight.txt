@@ -1,0 +1,1 @@
+Thrall selection: per-SteamID weights and a 10-second window for a thrall to decline the role (T + any ring command). By PokrassKin, MIT.
